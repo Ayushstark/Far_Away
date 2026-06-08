@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+anthropic
+chromadb
+supabase
+pypdf2
+python-multipart
+python-dotenv
+
