@@ -1,10 +1,10 @@
-# JARVIS Healthcare Agent
+# CareOS Healthcare Agent
 
 An early-stage healthcare assistant that coordinates specialist AI agents for
 symptom triage, report explanation, medication support, care planning, family
 visibility, and emergency escalation.
 
-![JARVIS Healthcare Architecture](docs/jarvis_healthcare_architecture.svg)
+![CareOS Healthcare Architecture](docs/careos_healthcare_architecture.svg)
 
 ## Current Stage
 
@@ -18,7 +18,7 @@ specialist agents, detect emergency language, return safe informational output,
 and run locally with placeholder credentials. Claude-powered personalized
 responses activate after adding a valid Anthropic API key.
 
-## What JARVIS Does
+## What CareOS Does
 
 - Accepts user health input through the web dashboard.
 - Uses a master orchestrator to infer intent and select relevant agents.
@@ -145,7 +145,7 @@ is intentionally ignored by Git.
 
 ## Safety Notice
 
-JARVIS is an informational assistant and prototype, not a medical device. It
+CareOS is an informational assistant and prototype, not a medical device. It
 must not diagnose, prescribe, or delay emergency care. For urgent symptoms,
 users should contact local emergency services immediately. Production use would
 require clinical review, privacy review, security hardening, and regulatory

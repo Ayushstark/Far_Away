@@ -22,10 +22,9 @@ class HealthcareAgent:
 
     async def run(self, message: str, context: list[str]) -> str:
         system = (
-            f"You are the JARVIS {self.name.replace('_', ' ')}. {self.purpose} "
+            f"You are the CareOS {self.name.replace('_', ' ')}. {self.purpose} "
             "Be cautious, concise, and never claim to diagnose. Ask for missing "
             "details and recommend professional care when appropriate."
         )
         memory = "\n".join(context) if context else "No relevant health memory."
         return await complete(system, f"Relevant memory:\n{memory}\n\nUser:\n{message}")
-

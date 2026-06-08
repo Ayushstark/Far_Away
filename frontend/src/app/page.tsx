@@ -49,7 +49,7 @@ export default function Home() {
         message: "The API is offline. Start FastAPI on port 8000 and try again.",
         agents_used: [],
         emergency: false,
-        disclaimer: "JARVIS provides general health information only.",
+        disclaimer: "CareOS provides general health information only.",
       });
     } finally {
       setLoading(false);
@@ -65,7 +65,7 @@ export default function Home() {
               <HeartPulse size={20} />
             </span>
             <div>
-              <p className="font-semibold">JARVIS Health</p>
+              <p className="font-semibold">CareOS Health</p>
               <p className="text-xs text-[#66746e]">Care coordination workspace</p>
             </div>
           </div>
@@ -132,7 +132,7 @@ export default function Home() {
               <textarea
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
-                placeholder="Tell JARVIS what is happening..."
+                placeholder="Tell CareOS what is happening..."
                 className="min-h-20 w-full resize-none border-0 bg-transparent text-sm outline-none placeholder:text-[#8a9891]"
               />
               <div className="flex items-center justify-between border-t border-[#e5ebe8] pt-3">

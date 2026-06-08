@@ -28,7 +28,6 @@ class ChatResponse(BaseModel):
     results: list[AgentResult]
     emergency: bool = False
     disclaimer: str = (
-        "JARVIS provides general health information and does not replace a "
+        "CareOS provides general health information and does not replace a "
         "qualified medical professional."
     )
-
