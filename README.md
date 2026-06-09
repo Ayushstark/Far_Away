@@ -8,27 +8,27 @@ visibility, and emergency escalation.
 
 ## Current Stage
 
-**Phase 0 complete:** the project has been scaffolded into a working full-stack
-prototype with a Next.js dashboard, FastAPI backend, five healthcare agent
-modules, a master orchestrator, ChromaDB memory hooks, Supabase-ready
-configuration, and local developer setup.
+**Phase 1 in progress:** the project is now a working full-stack prototype with
+a Next.js dashboard, FastAPI backend, structured intent classifier, five
+healthcare agents, emergency-first orchestration, semantic ChromaDB memory,
+Supabase-ready medication storage, PDF report reading, and doctor briefs.
 
 **Status:** hackathon MVP foundation. The app can route a user message to
 specialist agents, detect emergency language, return safe informational output,
-and run locally with placeholder credentials. Claude-powered personalized
-responses activate after adding a valid Anthropic API key.
+and run locally with placeholder credentials. Gemini and Groq-powered responses
+activate after adding their API keys.
 
 ## What CareOS Does
 
 - Accepts user health input through the web dashboard.
-- Uses a master orchestrator to infer intent and select relevant agents.
+- Uses a structured intent classifier and master orchestrator to select agents.
 - Routes work across five specialist agents:
   - Symptom analyst
   - Medical report reader
   - Medication manager
   - Care coordinator
   - Emergency detector
-- Stores and retrieves patient context through a ChromaDB-backed memory layer.
+- Stores and semantically retrieves patient context through ChromaDB.
 - Keeps the data model ready for family dashboards and Supabase persistence.
 - Produces plain-language insights, doctor-visit briefs, proactive nudges, and
   emergency escalation guidance.
@@ -40,8 +40,9 @@ responses activate after adding a valid Anthropic API key.
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
 | UI + Client | Axios, Lucide React |
 | Backend | Python, FastAPI, Uvicorn, Pydantic |
-| AI | Anthropic Claude API |
-| Memory | ChromaDB persistent vector store |
+| AI brain + PDF vision | Google Gemini 2.5 Flash |
+| Fast inference + fallback | Groq Llama 3.1 8B Instant |
+| Memory | ChromaDB with Gemini Embeddings and offline fallback |
 | Data Layer | Supabase-ready config |
 | Documents | PyPDF2, python-multipart |
 | Deployment Target | Vercel for frontend, Railway or similar for backend |
@@ -104,11 +105,26 @@ API docs: http://localhost:8000/docs
 Health check: http://localhost:8000/health
 ```
 
+## API Surface
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/chat` | Emergency-first multi-agent orchestration |
+| `POST /api/intents/classify` | Structured multi-intent classification |
+| `POST /api/memory/search` | User-scoped semantic health-memory search |
+| `POST /api/reports/read` | PDF extraction, interpretation, and memory storage |
+| `POST /api/medications` | Add, list, explain, or check medication interactions |
+| `GET /api/care-brief/{profile_id}` | Generate a printer-friendly care brief |
+| `GET /api/care-brief/{profile_id}/pdf` | Download the care brief as a PDF |
+
 ## Environment Variables
 
 ```env
-ANTHROPIC_API_KEY=your_key
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=llama-3.1-8b-instant
 SUPABASE_URL=your_url
 SUPABASE_KEY=your_key
 CHROMA_PATH=memory/chroma
@@ -118,23 +134,39 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 The committed `.env.example` shows the expected variables. The real `.env` file
 is intentionally ignored by Git.
 
+### Provider Routing
+
+| Workload | Primary | Automatic fallback |
+| --- | --- | --- |
+| Intent classification, emergency reasoning, response merging | Gemini 2.5 Flash | Groq |
+| PDF report understanding | Gemini 2.5 Flash multimodal | Extracted-text fallback |
+| Fast specialist responses | Groq Llama 3.1 8B Instant | Gemini |
+| Semantic memory embeddings | Gemini Embeddings | Offline deterministic embeddings |
+
+When Supabase is configured, CareOS expects `medications` and
+`emergency_alerts` tables. Local development continues with safe fallbacks if
+Supabase or those tables are unavailable.
+
 ## Implemented So Far
 
 - Full project scaffold matching the requested architecture.
 - Next.js dashboard with specialist agent navigation and chat input.
-- FastAPI API with `/health` and `/api/chat` endpoints.
-- Master orchestrator service.
-- Five specialist agent definitions.
-- Anthropic Claude service wrapper with no-key fallback.
-- Emergency red-flag detection.
-- ChromaDB memory adapter with graceful fallback if local embedding storage is
-  unavailable.
+- FastAPI APIs for chat, memory search, report reading, medications, and briefs.
+- Emergency-first master orchestrator and structured intent classifier.
+- Five dedicated specialist agent implementations.
+- Gemini-first reasoning and Groq-first fast-inference provider router.
+- Automatic Gemini/Groq provider fallback when one API is unavailable.
+- Emergency red-flag detection with structured severity and immediate steps.
+- ChromaDB semantic search using deterministic offline embeddings.
+- PDF report extraction and report-memory storage.
+- Supabase medication repository with a local development fallback.
+- Printer-friendly care brief and downloadable PDF generation.
 - Project README, env template, dependency files, and Git ignore rules.
 
 ## Roadmap
 
-- Add real PDF upload and report parsing workflow.
-- Replace keyword routing with LLM-based intent planning.
+- Add richer structured extraction for PDF lab tables.
+- Expand classifier evaluation and multi-intent routing tests.
 - Add Supabase schema for profiles, family members, medications, and alerts.
 - Generate downloadable doctor briefs.
 - Add medication reminder and proactive nudge scheduling.

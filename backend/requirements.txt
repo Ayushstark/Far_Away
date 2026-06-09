@@ -1,9 +1,11 @@
 fastapi
 uvicorn[standard]
-anthropic
+google-genai
+groq
 chromadb
 supabase
-pypdf2
+pypdf
 python-multipart
 python-dotenv
-
+reportlab
+pytest

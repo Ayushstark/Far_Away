@@ -1,41 +1,101 @@
-from agents.registry import AGENTS
-from backend.app.schemas import AgentResult, ChatResponse
+from agents.care_coordinator import create_care_brief
+from agents.emergency import assess_emergency, emergency_response
+from agents.medication import MedicationManager
+from agents.symptom import analyze_symptoms
+from backend.app.schemas import AgentResult, ChatResponse, IntentName
+from backend.app.services.intent_classifier import classify_intent
+from backend.app.services.emergency_notifier import EmergencyNotifier
+from backend.app.services.medication_repository import MedicationRepository
+from backend.app.services.response_merger import merge_responses
 from memory.store import HealthMemory
 
 
 class Orchestrator:
-    def __init__(self) -> None:
-        self.memory = HealthMemory()
+    def __init__(
+        self,
+        memory: HealthMemory | None = None,
+        medications: MedicationRepository | None = None,
+    ) -> None:
+        self.memory = memory or HealthMemory()
+        self.medications = medications or MedicationRepository()
+        self.medication_manager = MedicationManager(self.medications)
+        self.emergency_notifier = EmergencyNotifier()
 
     async def run(self, message: str, profile_id: str) -> ChatResponse:
-        selected = [agent for agent in AGENTS if agent.matches(message)]
-        if not selected:
-            selected = [AGENTS[0], AGENTS[3]]
+        history = self.memory.recall(profile_id, message)
 
-        emergency_agent = AGENTS[-1]
-        if emergency_agent not in selected:
-            selected.append(emergency_agent)
-
-        context = self.memory.recall(profile_id, message)
-        results = [
-            AgentResult(agent=agent.name, summary=await agent.run(message, context))
-            for agent in selected
-        ]
-        emergency = emergency_agent.is_emergency(message)
-
-        self.memory.remember(profile_id, message, {"type": "user_message"})
-        response_text = "\n\n".join(result.summary for result in results)
-        if emergency:
-            response_text = (
-                "This may be an emergency. Call local emergency services now "
-                "(112 in India, 911 in the US) and do not wait for this app.\n\n"
-                + response_text
+        # Emergency screening always runs first and can short-circuit all other work.
+        emergency = await assess_emergency(message)
+        if emergency.is_emergency:
+            emergency.family_notified = self.emergency_notifier.notify_family(
+                profile_id,
+                message,
+                emergency,
+            )
+            self.memory.remember(
+                profile_id,
+                message,
+                {"type": "emergency_message", "severity": emergency.severity},
+            )
+            alert = emergency_response(emergency)
+            return ChatResponse(
+                message=alert,
+                intents=["emergency_detection"],
+                agents_used=["emergency_detector"],
+                results=[AgentResult(agent="emergency_detector", summary=alert)],
+                emergency=True,
+                emergency_details=emergency,
             )
 
+        intents = await classify_intent(message)
+        actionable = [intent for intent in intents if intent != "emergency_detection"]
+        if not actionable:
+            actionable = ["symptom_analysis"]
+
+        results: list[AgentResult] = []
+        for intent in actionable:
+            result = await self._run_intent(intent, message, profile_id, history)
+            if result:
+                results.append(result)
+
+        self.memory.remember(profile_id, message, {"type": "user_message"})
+        merged = await merge_responses(results)
         return ChatResponse(
-            message=response_text,
-            agents_used=[agent.name for agent in selected],
+            message=merged,
+            intents=intents,
+            agents_used=["emergency_detector", *[result.agent for result in results]],
             results=results,
-            emergency=emergency,
         )
 
+    async def _run_intent(
+        self,
+        intent: IntentName,
+        message: str,
+        profile_id: str,
+        history: list[str],
+    ) -> AgentResult | None:
+        if intent == "symptom_analysis":
+            return AgentResult(
+                agent="symptom_analyst",
+                summary=await analyze_symptoms(message, history),
+            )
+        if intent == "report_reading":
+            return AgentResult(
+                agent="report_reader",
+                summary="Please upload the PDF report using the report endpoint for a full interpretation.",
+            )
+        if intent == "medication_management":
+            return AgentResult(
+                agent="medication_manager",
+                summary=await self.medication_manager.run(
+                    "explain",
+                    {"drug": message},
+                    profile_id,
+                ),
+            )
+        if intent == "care_coordination":
+            return AgentResult(
+                agent="care_coordinator",
+                summary=await create_care_brief(profile_id, self.memory, self.medications),
+            )
+        return None

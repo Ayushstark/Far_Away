@@ -1,8 +1,15 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
+IntentName = Literal[
+    "symptom_analysis",
+    "report_reading",
+    "medication_management",
+    "care_coordination",
+    "emergency_detection",
+]
 AgentName = Literal[
     "symptom_analyst",
     "report_reader",
@@ -10,6 +17,7 @@ AgentName = Literal[
     "care_coordinator",
     "emergency_detector",
 ]
+MedicationAction = Literal["add", "check_interactions", "explain", "list"]
 
 
 class ChatRequest(BaseModel):
@@ -22,12 +30,65 @@ class AgentResult(BaseModel):
     summary: str
 
 
+class EmergencyAssessment(BaseModel):
+    is_emergency: bool = False
+    severity: Literal["critical", "moderate", "none"] = "none"
+    suspected: str = ""
+    immediate_steps: list[str] = Field(default_factory=list)
+    call_number: str = "112 or 108"
+    family_notified: bool = False
+
+
 class ChatResponse(BaseModel):
     message: str
+    intents: list[IntentName] = Field(default_factory=list)
     agents_used: list[AgentName]
     results: list[AgentResult]
     emergency: bool = False
+    emergency_details: EmergencyAssessment | None = None
     disclaimer: str = (
         "CareOS provides general health information and does not replace a "
         "qualified medical professional."
     )
+
+
+class MedicationRequest(BaseModel):
+    action: MedicationAction
+    profile_id: str = Field(default="demo-user", max_length=100)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class MedicationResponse(BaseModel):
+    action: MedicationAction
+    message: str
+    medications: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CareBriefResponse(BaseModel):
+    profile_id: str
+    brief: str
+
+
+class ReportResponse(BaseModel):
+    profile_id: str
+    filename: str
+    interpretation: str
+
+
+class MemorySearchRequest(BaseModel):
+    profile_id: str = Field(default="demo-user", max_length=100)
+    query: str = Field(min_length=1, max_length=2_000)
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class MemorySearchResponse(BaseModel):
+    available: bool
+    results: list[str]
+
+
+class IntentClassificationRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=10_000)
+
+
+class IntentClassificationResponse(BaseModel):
+    intents: list[IntentName]

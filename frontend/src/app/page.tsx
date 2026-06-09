@@ -12,7 +12,7 @@ import {
   Stethoscope,
   Users,
 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
 
 const agents = [
   { name: "Symptom analyst", detail: "Clarifies symptoms", icon: Activity },
@@ -33,6 +33,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState<Reply | null>(null);
   const [loading, setLoading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -53,6 +54,36 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function uploadReport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { data } = await axios.post<{ interpretation: string }>(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/reports/read?profile_id=demo-user`,
+        form,
+      );
+      setReply({
+        message: data.interpretation,
+        agents_used: ["report_reader"],
+        emergency: false,
+        disclaimer: "CareOS provides general health information only.",
+      });
+    } catch {
+      setReply({
+        message: "CareOS could not read this report. Please upload a text-based PDF.",
+        agents_used: ["report_reader"],
+        emergency: false,
+        disclaimer: "CareOS provides general health information only.",
+      });
+    } finally {
+      setLoading(false);
+      event.target.value = "";
     }
   }
 
@@ -112,7 +143,13 @@ export default function Home() {
           </div>
           <div className="flex flex-1 flex-col justify-end gap-5 p-6">
             {reply ? (
-              <div className={`max-w-2xl border-l-4 p-4 ${reply.emergency ? "border-[#c4432b] bg-[#fff4f1]" : "border-[#12664f] bg-[#f1f8f5]"}`}>
+              <div className={`max-w-2xl border-l-4 p-4 ${reply.emergency ? "border-[#c4432b] bg-[#fff0ec] text-[#721c10]" : "border-[#12664f] bg-[#f1f8f5]"}`}>
+                {reply.emergency && (
+                  <div className="mb-3 flex items-center gap-2 text-base font-bold uppercase">
+                    <AlertTriangle size={22} />
+                    Emergency alert
+                  </div>
+                )}
                 <p className="whitespace-pre-wrap text-sm leading-6">{reply.message}</p>
                 {!!reply.agents_used.length && (
                   <p className="mt-3 text-xs text-[#66746e]">
@@ -136,7 +173,19 @@ export default function Home() {
                 className="min-h-20 w-full resize-none border-0 bg-transparent text-sm outline-none placeholder:text-[#8a9891]"
               />
               <div className="flex items-center justify-between border-t border-[#e5ebe8] pt-3">
-                <button type="button" title="Attach medical report" className="grid size-9 place-items-center rounded-md text-[#66746e] hover:bg-[#f1f5f3]">
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={uploadReport}
+                />
+                <button
+                  type="button"
+                  title="Attach medical report"
+                  onClick={() => fileInput.current?.click()}
+                  className="grid size-9 place-items-center rounded-md text-[#66746e] hover:bg-[#f1f5f3]"
+                >
                   <Paperclip size={18} />
                 </button>
                 <button disabled={loading} title="Send message" className="grid size-9 place-items-center rounded-md bg-[#12664f] text-white disabled:opacity-50">
