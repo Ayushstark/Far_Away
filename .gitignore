@@ -4,6 +4,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 memory/chroma/
+Chroma_data/
 frontend/.next/
 frontend/node_modules/
-

@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app import db
 from backend.app.services import llm
 from memory.store import HealthMemory
 
@@ -17,7 +18,10 @@ def test_semantic_memory_is_user_scoped() -> None:
     assert results == ["Started a new blood pressure medicine"]
 
 
-def test_chat_runs_emergency_first() -> None:
+def test_chat_runs_emergency_first(monkeypatch) -> None:
+    monkeypatch.setattr(db, "get_health_history", lambda *args, **kwargs: "No history")
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [])
+    monkeypatch.setattr(db, "save_health_event", lambda **kwargs: kwargs)
     client = TestClient(app)
 
     response = client.post(
@@ -30,7 +34,15 @@ def test_chat_runs_emergency_first() -> None:
     assert response.json()["agents_used"] == ["emergency_detector"]
 
 
-def test_medication_add_and_list() -> None:
+def test_medication_add_and_list(monkeypatch) -> None:
+    saved: list[dict] = []
+
+    def add(**kwargs):
+        saved.append(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(db, "add_medication", add)
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: saved)
     client = TestClient(app)
     response = client.post(
         "/api/medications",
@@ -42,7 +54,7 @@ def test_medication_add_and_list() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["medications"][0]["drug"] == "ExampleMed"
+    assert response.json()["medications"][0]["drug_name"] == "ExampleMed"
 
 
 def test_reasoning_routes_to_gemini_first(monkeypatch) -> None:

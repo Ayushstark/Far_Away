@@ -1,0 +1,270 @@
+"""Small Supabase data-access layer for CareOS.
+
+Keeping database calls here gives the API and agents one consistent view of the
+final Supabase schema, while leaving orchestration code focused on healthcare
+workflows.
+"""
+
+from datetime import date
+from typing import Any
+
+from supabase import Client, create_client
+
+from backend.app.config import settings
+
+_client: Client | None = None
+
+
+def get_client() -> Client:
+    """Return one service-role Supabase client for the backend process."""
+    global _client
+    if _client is None:
+        if not settings.supabase_url or not settings.supabase_key:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be configured.")
+        _client = create_client(settings.supabase_url, settings.supabase_key)
+    return _client
+
+
+def get_user(user_id: str) -> dict[str, Any] | None:
+    response = (
+        get_client()
+        .table("users")
+        .select("*")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def get_health_history(
+    user_id: str,
+    family_member_id: str | None = None,
+    limit: int = 20,
+) -> str:
+    query = (
+        get_client()
+        .table("health_events")
+        .select(
+            "event_type,description,ai_response,severity,body_part,resolved,created_at"
+        )
+        .eq("user_id", user_id)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    if not response.data:
+        return "No previous health events found."
+
+    events = []
+    for event in response.data:
+        created_at = _display_date(event.get("created_at"))
+        heading = (
+            f"{created_at} | {event.get('event_type', 'health event')} | "
+            f"severity: {event.get('severity') or 'not recorded'}"
+        )
+        if event.get("body_part"):
+            heading += f" | body part: {event['body_part']}"
+        detail = event.get("description") or "No description."
+        if event.get("ai_response"):
+            detail += f"\nCareOS response: {event['ai_response']}"
+        events.append(f"{heading}\n{detail}")
+    return "\n\n".join(events)
+
+
+def save_health_event(
+    user_id: str,
+    event_type: str,
+    description: str,
+    ai_response: str,
+    severity: str,
+    body_part: str | None,
+    family_member_id: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "user_id": user_id,
+        "event_type": event_type,
+        "description": description,
+        "ai_response": ai_response,
+        "severity": severity,
+        "body_part": body_part,
+        "family_member_id": family_member_id,
+    }
+    response = get_client().table("health_events").insert(payload).execute()
+    return _first_row(response.data)
+
+
+def get_medications(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> list[dict[str, Any]]:
+    query = (
+        get_client()
+        .table("medications")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("is_active", True)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return response.data or []
+
+
+def add_medication(
+    user_id: str,
+    drug_name: str,
+    dose: str,
+    frequency: str,
+    timing: list[str],
+    with_food: bool,
+    family_member_id: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "user_id": user_id,
+        "family_member_id": family_member_id,
+        "drug_name": drug_name,
+        "dose": dose,
+        "frequency": frequency,
+        "timing": timing,
+        "with_food": with_food,
+        "is_active": True,
+    }
+    response = get_client().table("medications").insert(payload).execute()
+    return _first_row(response.data)
+
+
+def save_report(
+    user_id: str,
+    report_type: str,
+    file_url: str,
+    ai_summary: str,
+    flagged_values: dict[str, Any] | list[Any],
+    family_member_id: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "user_id": user_id,
+        "family_member_id": family_member_id,
+        "report_type": report_type,
+        "file_url": file_url,
+        "report_date": date.today().isoformat(),
+        "ai_summary": ai_summary,
+        "flagged_values": flagged_values,
+    }
+    response = get_client().table("reports").insert(payload).execute()
+    return _first_row(response.data)
+
+
+def get_past_reports_summary(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> str:
+    query = (
+        get_client()
+        .table("reports")
+        .select("report_type,report_date,lab_name,ai_summary,flagged_values,uploaded_at")
+        .eq("user_id", user_id)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("uploaded_at", desc=True)
+        .limit(3)
+        .execute()
+    )
+    if not response.data:
+        return "No previous report summaries found."
+
+    summaries = []
+    for report in response.data:
+        label = report.get("report_type") or "Medical report"
+        report_date = _display_date(report.get("report_date") or report.get("uploaded_at"))
+        lab = f" from {report['lab_name']}" if report.get("lab_name") else ""
+        summaries.append(
+            f"{report_date} | {label}{lab}\n"
+            f"{report.get('ai_summary') or 'No AI summary available.'}"
+        )
+    return "\n\n".join(summaries)
+
+
+def get_reports(
+    user_id: str,
+    family_member_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    query = get_client().table("reports").select("*").eq("user_id", user_id)
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("uploaded_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
+def create_family_member(
+    owner_id: str,
+    name: str,
+    relation: str,
+    age: int,
+    blood_group: str,
+    known_conditions: list[str],
+) -> dict[str, Any]:
+    payload = {
+        "owner_id": owner_id,
+        "name": name,
+        "relation": relation,
+        "age": age,
+        "blood_group": blood_group,
+        "known_conditions": known_conditions,
+    }
+    response = get_client().table("family_members").insert(payload).execute()
+    return _first_row(response.data)
+
+
+def get_family_members(owner_id: str) -> list[dict[str, Any]]:
+    response = (
+        get_client()
+        .table("family_members")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return response.data or []
+
+
+def upload_report_file(user_id: str, filename: str, content: bytes) -> str:
+    """Upload a PDF to the reports bucket and return its stored URL."""
+    safe_name = filename.replace("\\", "_").replace("/", "_")
+    path = f"{user_id}/{date.today().isoformat()}-{safe_name}"
+    bucket = get_client().storage.from_("reports")
+    bucket.upload(
+        path,
+        content,
+        file_options={"content-type": "application/pdf", "upsert": "true"},
+    )
+    return bucket.get_public_url(path)
+
+
+def _scope_family_member(query: Any, family_member_id: str | None) -> Any:
+    # Null means the owner's own record; a UUID switches to a dependent profile.
+    if family_member_id:
+        return query.eq("family_member_id", family_member_id)
+    return query.is_("family_member_id", "null")
+
+
+def _first_row(rows: list[dict[str, Any]] | None) -> dict[str, Any]:
+    if not rows:
+        raise RuntimeError("Supabase insert succeeded without returning a row.")
+    return rows[0]
+
+
+def _display_date(value: Any) -> str:
+    if not value:
+        return "Unknown date"
+    return str(value)[:10]

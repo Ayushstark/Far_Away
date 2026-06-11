@@ -1,24 +1,12 @@
 from typing import Any
 
 from backend.app.services.llm import complete
-from backend.app.services.medication_repository import MedicationRepository
 
 
 class MedicationManager:
-    def __init__(self, repository: MedicationRepository) -> None:
-        self.repository = repository
-
     async def run(self, action: str, data: dict[str, Any], user_id: str) -> str:
-        if action == "add":
-            medication = self.repository.add(user_id, data)
-            return f"Saved {medication['drug']} {medication['dose']} to the medication list."
-
-        if action == "list":
-            medications = self.repository.list(user_id)
-            return self._format_list(medications)
-
         if action == "check_interactions":
-            medications = self.repository.list(user_id)
+            medications = data.get("current_medications") or []
             new_drug = str(data.get("new_drug") or "").strip()
             response = await complete(
                 "You provide cautious medication safety information. Never prescribe.",
@@ -52,12 +40,3 @@ prescriber's instructions.
             )
 
         raise ValueError(f"Unsupported medication action: {action}")
-
-    @staticmethod
-    def _format_list(medications: list[dict[str, Any]]) -> str:
-        if not medications:
-            return "No medications are saved for this profile."
-        return "\n".join(
-            f"- {item.get('drug', '')} {item.get('dose', '')} at {item.get('times', [])}"
-            for item in medications
-        )

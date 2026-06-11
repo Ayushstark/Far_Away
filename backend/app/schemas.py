@@ -23,6 +23,7 @@ MedicationAction = Literal["add", "check_interactions", "explain", "list"]
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
     profile_id: str = Field(default="demo-user", max_length=100)
+    family_member_id: str | None = Field(default=None, max_length=100)
 
 
 class AgentResult(BaseModel):
@@ -92,3 +93,38 @@ class IntentClassificationRequest(BaseModel):
 
 class IntentClassificationResponse(BaseModel):
     intents: list[IntentName]
+
+
+class FamilyMemberCreate(BaseModel):
+    owner_id: str
+    name: str
+    relation: str
+    age: int = Field(ge=0, le=130)
+    blood_group: str
+    known_conditions: list[str] = Field(default_factory=list)
+
+
+class MedicationCreate(BaseModel):
+    user_id: str
+    drug_name: str
+    dose: str
+    frequency: str
+    timing: list[str] = Field(default_factory=list)
+    with_food: bool = False
+    family_member_id: str | None = None
+
+
+class HistoryResponse(BaseModel):
+    user_id: str
+    family_member_id: str | None = None
+    history: str
+
+
+class InteractionCheckRequest(BaseModel):
+    user_id: str
+    new_drug: str
+    family_member_id: str | None = None
+
+
+class InteractionCheckResponse(BaseModel):
+    message: str

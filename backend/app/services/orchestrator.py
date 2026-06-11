@@ -5,7 +5,6 @@ from agents.symptom import analyze_symptoms
 from backend.app.schemas import AgentResult, ChatResponse, IntentName
 from backend.app.services.intent_classifier import classify_intent
 from backend.app.services.emergency_notifier import EmergencyNotifier
-from backend.app.services.medication_repository import MedicationRepository
 from backend.app.services.response_merger import merge_responses
 from memory.store import HealthMemory
 
@@ -14,15 +13,19 @@ class Orchestrator:
     def __init__(
         self,
         memory: HealthMemory | None = None,
-        medications: MedicationRepository | None = None,
     ) -> None:
         self.memory = memory or HealthMemory()
-        self.medications = medications or MedicationRepository()
-        self.medication_manager = MedicationManager(self.medications)
+        self.medication_manager = MedicationManager()
         self.emergency_notifier = EmergencyNotifier()
 
-    async def run(self, message: str, profile_id: str) -> ChatResponse:
-        history = self.memory.recall(profile_id, message)
+    async def run(
+        self,
+        message: str,
+        profile_id: str,
+        health_history: str | None = None,
+        current_medications: list[dict] | None = None,
+    ) -> ChatResponse:
+        history = [health_history] if health_history else self.memory.recall(profile_id, message)
 
         # Emergency screening always runs first and can short-circuit all other work.
         emergency = await assess_emergency(message)
@@ -54,7 +57,13 @@ class Orchestrator:
 
         results: list[AgentResult] = []
         for intent in actionable:
-            result = await self._run_intent(intent, message, profile_id, history)
+            result = await self._run_intent(
+                intent,
+                message,
+                profile_id,
+                history,
+                current_medications or [],
+            )
             if result:
                 results.append(result)
 
@@ -73,6 +82,7 @@ class Orchestrator:
         message: str,
         profile_id: str,
         history: list[str],
+        current_medications: list[dict],
     ) -> AgentResult | None:
         if intent == "symptom_analysis":
             return AgentResult(
@@ -89,13 +99,18 @@ class Orchestrator:
                 agent="medication_manager",
                 summary=await self.medication_manager.run(
                     "explain",
-                    {"drug": message},
+                    {"drug": message, "current_medications": current_medications},
                     profile_id,
                 ),
             )
         if intent == "care_coordination":
             return AgentResult(
                 agent="care_coordinator",
-                summary=await create_care_brief(profile_id, self.memory, self.medications),
+                summary=await create_care_brief(
+                    profile_id,
+                    self.memory,
+                    health_history="\n".join(history),
+                    current_medications=current_medications,
+                ),
             )
         return None

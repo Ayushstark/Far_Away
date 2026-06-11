@@ -51,6 +51,7 @@ Return:
 }}
 """,
         fallback.model_dump(),
+        provider="fast",
     )
     try:
         assessment = EmergencyAssessment.model_validate(result)

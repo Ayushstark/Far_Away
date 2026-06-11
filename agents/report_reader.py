@@ -16,14 +16,17 @@ async def read_report(
     content: bytes,
     user_id: str,
     memory: HealthMemory,
+    past_reports_summary: str | None = None,
 ) -> str:
     text = extract_pdf_text(content)
-    past_reports = memory.recall(user_id, "blood report lab test", memory_type="report")
+    past_reports = past_reports_summary or "\n".join(
+        memory.recall(user_id, "blood report lab test", memory_type="report")
+    )
     response = await complete_pdf(
         "You explain medical reports to non-clinicians. Never diagnose.",
         f"""
 Previous reports:
-{chr(10).join(past_reports) or "None available"}
+{past_reports or "None available"}
 
 Read the attached current medical report PDF directly, including tables, charts,
 and scanned content when visible.
@@ -48,7 +51,7 @@ Gemini PDF vision was unavailable. Interpret this extracted report text:
 {text[:20_000]}
 
 Previous reports:
-{chr(10).join(past_reports) or "None available"}
+{past_reports or "None available"}
 
 List values in a simple table, explain abnormalities, compare prior reports,
 give cautious lifestyle suggestions, and identify prompt doctor-attention needs.

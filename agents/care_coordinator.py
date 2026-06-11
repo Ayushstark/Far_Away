@@ -2,23 +2,31 @@ from io import BytesIO
 from textwrap import wrap
 
 from backend.app.services.llm import complete
-from backend.app.services.medication_repository import MedicationRepository
 from memory.store import HealthMemory
 
 
 async def create_care_brief(
     user_id: str,
-    memory: HealthMemory,
-    medications: MedicationRepository,
+    memory: HealthMemory | None = None,
+    health_history: str | None = None,
+    current_medications: list[dict] | None = None,
+    user_profile: dict | None = None,
 ) -> str:
-    history = memory.history(user_id)
-    recent_symptoms = memory.recall(user_id, "recent symptoms complaint", limit=8)
-    current_medications = medications.list(user_id)
+    history = health_history or (
+        "\n".join(memory.history(user_id)) if memory else "No history available."
+    )
+    recent_symptoms = (
+        memory.recall(user_id, "recent symptoms complaint", limit=8)
+        if memory
+        else []
+    )
+    medication_list = current_medications or []
     response = await complete(
         "You create clear, printer-friendly doctor visit briefs. Never diagnose.",
         f"""
+Patient profile: {user_profile or "Not available"}
 Health history: {history}
-Current medications: {current_medications}
+Current medications: {medication_list}
 Recent complaints: {recent_symptoms}
 
 Format as:
@@ -34,7 +42,7 @@ Format as:
     return response or (
         "PATIENT SUMMARY\nNo generated summary is available until a Gemini or Groq "
         "API key is configured.\n\nCURRENT MEDICATIONS\n"
-        + MedicationRepositoryText.format(current_medications)
+        + MedicationRepositoryText.format(medication_list)
         + "\n\nRECENT HEALTH MEMORY\n"
         + ("\n".join(f"- {item}" for item in recent_symptoms) or "- None saved")
     )
@@ -43,7 +51,13 @@ Format as:
 class MedicationRepositoryText:
     @staticmethod
     def format(items: list[dict]) -> str:
-        return "\n".join(f"- {item.get('drug')} {item.get('dose')}" for item in items) or "- None saved"
+        return (
+            "\n".join(
+                f"- {item.get('drug_name') or item.get('drug')} {item.get('dose')}"
+                for item in items
+            )
+            or "- None saved"
+        )
 
 
 def brief_to_pdf(brief: str) -> bytes:

@@ -33,11 +33,12 @@ async def complete_json(
     system: str,
     prompt: str,
     fallback: dict[str, Any] | list[Any],
+    provider: Provider = "reasoning",
 ) -> dict[str, Any] | list[Any]:
     response = await complete(
         f"{system} Return valid JSON only, without markdown fences or commentary.",
         prompt,
-        provider="reasoning",
+        provider=provider,
     )
     if not response:
         return fallback
