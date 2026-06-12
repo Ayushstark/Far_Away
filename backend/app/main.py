@@ -96,7 +96,7 @@ async def search_memory(request: MemorySearchRequest) -> MemorySearchResponse:
 @app.post("/api/reports/read", response_model=ReportResponse, include_in_schema=False)
 async def report_reader(
     file: UploadFile = File(...),
-    profile_id: str = Form(default="demo-user"),
+    profile_id: str = Form(default="9000001"),
     family_member_id: str | None = Form(default=None),
     report_type: str = Form(default="blood report"),
 ) -> ReportResponse:

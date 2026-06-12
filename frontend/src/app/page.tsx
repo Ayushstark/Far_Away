@@ -24,7 +24,7 @@ import {
 import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const OWNER_ID = "demo-user";
+const OWNER_ID = "9000001";
 
 type Tab = "chat" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
@@ -58,6 +58,7 @@ type Profile = {
   known_conditions?: string[];
   allergies?: string[];
   emergency_contact?: string;
+  emergency_contacts?: string[];
   relation?: string;
 };
 
@@ -110,6 +111,8 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
   const [emergency, setEmergency] = useState<EmergencyDetails | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [ownerProfile, setOwnerProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
@@ -139,7 +142,8 @@ export default function Home() {
         setActiveProfile(profileResponse.data);
         setFamily(familyResponse.data);
       })
-      .catch(() => undefined);
+      .catch(() => setProfileError("Demo profile could not be loaded. Check the backend and Supabase connection."))
+      .finally(() => setProfilesLoading(false));
   }, []);
 
   const familyMemberId = activeProfile.id === OWNER_ID ? undefined : activeProfile.id;
@@ -243,6 +247,9 @@ export default function Home() {
 
         <section className="relative flex min-h-dvh min-w-0 flex-1 flex-col pb-20 md:pb-0">
           <Header tab={tab} activeProfile={activeProfile} />
+          {(profilesLoading || profileError) && (
+            <ServiceNotice loading={profilesLoading} error={profileError} />
+          )}
           {tab === "chat" ? (
             <ChatScreen
               input={input}
@@ -475,6 +482,7 @@ function EmergencyOverlay({
 function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const [reports, setReports] = useState<Report[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -485,7 +493,8 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
         params: { family_member_id: familyMemberId },
       })
       .then(({ data }) => setReports(data))
-      .catch(() => setError("Could not load reports."));
+      .catch(() => setError("Could not load reports."))
+      .finally(() => setInitialLoading(false));
   }, [familyMemberId]);
 
   async function loadReports() {
@@ -558,7 +567,8 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
             {expanded === report.id && <p className="mt-4 whitespace-pre-wrap border-t border-[#e5ece8] pt-4 text-sm leading-6">{report.ai_summary}</p>}
           </article>
         ))}
-        {!reports.length && !error && <EmptyState text="No reports uploaded yet." />}
+        {initialLoading && <LoadingState text="Loading reports..." />}
+        {!initialLoading && !reports.length && !error && <EmptyState text="No reports uploaded yet." />}
       </div>
     </ScreenShell>
   );
@@ -568,6 +578,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const [medications, setMedications] = useState<Medication[]>([]);
   const [form, setForm] = useState({ drug_name: "", dose: "", frequency: "", timing: "", with_food: false });
   const [interaction, setInteraction] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -577,7 +588,8 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
         params: { family_member_id: familyMemberId },
       })
       .then(({ data }) => setMedications(data))
-      .catch(() => setError("Could not load medications."));
+      .catch(() => setError("Could not load medications."))
+      .finally(() => setInitialLoading(false));
   }, [familyMemberId]);
 
   async function loadMedications() {
@@ -639,12 +651,13 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
           <article key={medication.id} className="rounded-md border border-[#dfe8e4] p-4">
             <Pill size={18} className="text-[#12664f]" />
             <p className="mt-3 text-sm font-semibold">{medication.drug_name}</p>
-            <p className="mt-1 text-xs text-[#687971]">{medication.dose} · {medication.frequency}</p>
-            <p className="mt-2 text-xs text-[#687971]">{medication.timing?.join(", ") || "Timing not set"}{medication.with_food ? " · with food" : ""}</p>
+            <p className="mt-1 text-xs text-[#687971]">{medication.dose} | {medication.frequency}</p>
+            <p className="mt-2 text-xs text-[#687971]">{medication.timing?.join(", ") || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
           </article>
         ))}
       </div>
-      {!medications.length && <EmptyState text="No active medications." />}
+      {initialLoading && <LoadingState text="Loading medications..." />}
+      {!initialLoading && !medications.length && !error && <EmptyState text="No active medications." />}
       <form onSubmit={addMedication} className="space-y-3 border-t border-[#dfe8e4] pt-5">
         <h2 className="text-sm font-semibold">Add medication</h2>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -660,8 +673,8 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
         {interaction && <p className="rounded-md border border-[#e0b562] bg-[#fff8e8] p-3 text-xs leading-5 text-[#6f5015]">{interaction}</p>}
         <ErrorText text={error} />
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={checkInteractions} disabled={busy || !form.drug_name} className="h-10 rounded-md border border-[#12664f] px-4 text-sm font-semibold text-[#12664f] disabled:opacity-40">Check interactions</button>
-          <button disabled={busy} className="h-10 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white disabled:opacity-40">Add medication</button>
+          <button type="button" onClick={checkInteractions} disabled={busy || !form.drug_name} className="h-10 rounded-md border border-[#12664f] px-4 text-sm font-semibold text-[#12664f] disabled:opacity-40">{busy ? "Checking..." : "Check interactions"}</button>
+          <button disabled={busy} className="h-10 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white disabled:opacity-40">{busy ? "Working..." : "Add medication"}</button>
         </div>
       </form>
     </ScreenShell>
@@ -670,10 +683,13 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
 
 function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }: { activeProfile: Profile; family: Profile[]; owner: Profile; onFamilyChange: (profiles: Profile[]) => void; onSelect: (profile: Profile) => void }) {
   const [form, setForm] = useState({ name: "", relation: "", age: "", blood_group: "", known_conditions: "" });
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function addMember(event: FormEvent) {
     event.preventDefault();
+    setBusy(true);
+    setError("");
     try {
       const { data } = await axios.post<Profile>(`${API_URL}/family/add`, {
         owner_id: OWNER_ID,
@@ -687,6 +703,8 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
       setForm({ name: "", relation: "", age: "", blood_group: "", known_conditions: "" });
     } catch {
       setError("Could not add family member.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -697,7 +715,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
           <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-md border p-4 text-left ${activeProfile.id === profile.id ? "border-[#12664f] bg-[#f1f8f5]" : "border-[#dfe8e4]"}`}>
             <UserRound size={19} className="text-[#12664f]" />
             <p className="mt-3 text-sm font-semibold">{profile.name}</p>
-            <p className="mt-1 text-xs text-[#687971]">{profile.id === OWNER_ID ? "Owner" : profile.relation} · {profile.age ?? "Age not set"}</p>
+            <p className="mt-1 text-xs text-[#687971]">{profile.id === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
             <p className="mt-2 text-xs text-[#687971]">{profile.known_conditions?.join(", ") || "No known conditions"}</p>
           </button>
         ))}
@@ -712,7 +730,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
         </div>
         <TextInput label="Known conditions, comma separated" value={form.known_conditions} onChange={(value) => setForm({ ...form, known_conditions: value })} />
         <ErrorText text={error} />
-        <button className="flex h-10 items-center gap-2 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white"><Plus size={17} /> Add family member</button>
+        <button disabled={busy} className="flex h-10 items-center gap-2 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white disabled:opacity-50">{busy ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />} {busy ? "Adding..." : "Add family member"}</button>
       </form>
     </ScreenShell>
   );
@@ -749,7 +767,7 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
         <ProfileField label="Age" value={profile.age} />
         <ProfileField label="Gender" value={profile.gender} />
         <ProfileField label="Blood group" value={profile.blood_group} />
-        <ProfileField label="Emergency contact" value={profile.emergency_contact} />
+        <ProfileField label="Emergency contact" value={profile.emergency_contact ?? profile.emergency_contacts?.join(", ")} />
       </div>
       <ProfileField label="Known conditions" value={profile.known_conditions?.join(", ")} />
       <ProfileField label="Allergies" value={profile.allergies?.join(", ")} />
@@ -778,8 +796,16 @@ function EmptyState({ text }: { text: string }) {
   return <p className="rounded-md border border-dashed border-[#cfdad5] px-4 py-8 text-center text-sm text-[#71827a]">{text}</p>;
 }
 
+function LoadingState({ text }: { text: string }) {
+  return <p className="flex items-center justify-center gap-2 rounded-md border border-[#dfe8e4] px-4 py-8 text-sm text-[#71827a]"><LoaderCircle className="animate-spin" size={17} />{text}</p>;
+}
+
 function ErrorText({ text }: { text: string }) {
   return text ? <p className="rounded-md border border-[#efb2a8] bg-[#fff2ef] p-3 text-xs text-[#982d1d]">{text}</p> : null;
+}
+
+function ServiceNotice({ loading, error }: { loading: boolean; error: string }) {
+  return <div className={`mx-4 mt-3 rounded-md border px-3 py-2 text-xs sm:mx-6 ${error ? "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]" : "border-[#b8d8ca] bg-[#f1f8f5] text-[#43675a]"}`}>{loading ? "Loading CareOS demo profile..." : error}</div>;
 }
 
 function formatDate(value?: string) {

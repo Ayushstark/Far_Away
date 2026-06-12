@@ -22,7 +22,7 @@ MedicationAction = Literal["add", "check_interactions", "explain", "list"]
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
-    profile_id: str = Field(default="demo-user", max_length=100)
+    profile_id: str = Field(default="9000001", max_length=100)
     family_member_id: str | None = Field(default=None, max_length=100)
 
 
@@ -55,7 +55,7 @@ class ChatResponse(BaseModel):
 
 class MedicationRequest(BaseModel):
     action: MedicationAction
-    profile_id: str = Field(default="demo-user", max_length=100)
+    profile_id: str = Field(default="9000001", max_length=100)
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -77,7 +77,7 @@ class ReportResponse(BaseModel):
 
 
 class MemorySearchRequest(BaseModel):
-    profile_id: str = Field(default="demo-user", max_length=100)
+    profile_id: str = Field(default="9000001", max_length=100)
     query: str = Field(min_length=1, max_length=2_000)
     limit: int = Field(default=5, ge=1, le=20)
 

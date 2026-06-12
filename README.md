@@ -1,95 +1,157 @@
-# CareOS Healthcare Agent
+# CareOS
 
-An early-stage healthcare assistant that coordinates specialist AI agents for
-symptom triage, report explanation, medication support, care planning, family
-visibility, and emergency escalation.
+CareOS is an emergency-first, multi-agent healthcare companion for Indian
+families. It turns scattered symptoms, medications, lab reports, and family
+health context into clear next steps and a doctor-ready care brief.
+
+> CareOS is an informational hackathon prototype, not a diagnosis or medical
+> device. For urgent symptoms, call local emergency services immediately.
 
 ![CareOS Healthcare Architecture](docs/careos_healthcare_architecture.svg)
 
+## Problem Statement
+
+People often manage health information across prescriptions, PDFs, chat
+messages, and memory. That fragmentation makes it harder to recognize urgent
+symptoms, understand reports, avoid medication mistakes, and explain recent
+history during a short doctor visit.
+
+CareOS gives each person and family member one simple care workspace backed by
+specialist AI agents and a shared health timeline.
+
 ## Current Stage
 
-**Phase 1 in progress:** the project is now a working full-stack prototype with
-a Next.js dashboard, FastAPI backend, structured intent classifier, five
-healthcare agents, emergency-first orchestration, semantic ChromaDB memory,
-Supabase-ready medication storage, PDF report reading, and doctor briefs.
+**Stage 5 complete: the end-to-end hackathon MVP is ready for demonstration.**
 
-**Status:** hackathon MVP foundation. The app can route a user message to
-specialist agents, detect emergency language, return safe informational output,
-and run locally with placeholder credentials. Gemini and Groq-powered responses
-activate after adding their API keys.
+- Supabase database layer for users, family, events, medications, and reports
+- Emergency-first orchestrator with five specialist agents
+- FastAPI routes for chat, reports, medications, family, history, and briefs
+- Responsive Next.js interface with voice-enabled chat and emergency overlay
+- Report, medication, family, and profile workflows
+- Repeatable Ramesh Gupta demo dataset, loading states, error handling, and tests
 
-## What CareOS Does
+### Build Progress
 
-- Accepts user health input through the web dashboard.
-- Uses a structured intent classifier and master orchestrator to select agents.
-- Routes work across five specialist agents:
-  - Symptom analyst
-  - Medical report reader
-  - Medication manager
-  - Care coordinator
-  - Emergency detector
-- Stores and semantically retrieves patient context through ChromaDB.
-- Keeps the data model ready for family dashboards and Supabase persistence.
-- Produces plain-language insights, doctor-visit briefs, proactive nudges, and
-  emergency escalation guidance.
+| Stage | Scope | Status |
+| --- | --- | --- |
+| 1 | Supabase database access layer | Complete |
+| 2 | Database-wired orchestrator and FastAPI routes | Complete |
+| 3 | Core layout, chat, voice input, and emergency UI | Complete |
+| 4 | Reports, medications, family, and profile screens | Complete |
+| 5 | Demo data, interface polish, tests, and documentation | Complete |
+
+## Five-Agent Architecture
+
+```mermaid
+flowchart LR
+    U["User or family profile"] --> API["FastAPI"]
+    API --> E["Emergency detector<br/>Groq Llama 3.1 8B"]
+    E -->|Emergency| ALERT["Immediate steps + Call 112"]
+    E -->|Clear| O["CareOS orchestrator<br/>Gemini Flash"]
+    O --> S["Symptom analyst"]
+    O --> R["Report reader"]
+    O --> M["Medication manager"]
+    O --> C["Care coordinator"]
+    S & R & M & C --> DB["Supabase health timeline"]
+    O --> MEM["ChromaDB semantic memory<br/>Gemini embeddings"]
+    DB & MEM --> UI["Next.js care workspace"]
+```
+
+The emergency detector runs before all other agents on every chat message.
+Gemini handles the main reasoning, PDF understanding, and semantic embeddings.
+Groq handles the speed-sensitive emergency layer and fast fallback responses.
+
+## Request Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Next.js UI
+    participant API as FastAPI
+    participant Groq as Groq Emergency Layer
+    participant Gemini as Gemini Agents
+    participant Data as Supabase + ChromaDB
+
+    User->>UI: Send health message
+    UI->>API: POST /chat with active profile
+    API->>Data: Load history and medications
+    API->>Groq: Run emergency detector first
+    alt Emergency detected
+        Groq-->>API: Immediate steps and call number
+        API-->>UI: Emergency response
+        UI-->>User: Full-screen red alert
+    else No emergency
+        API->>Gemini: Classify intent and call specialist agents
+        Gemini-->>API: Plain-language care guidance
+        API->>Data: Save health event
+        API-->>UI: Merged CareOS response
+    end
+```
 
 ## Tech Stack
 
-| Layer | Tools |
+| Layer | Technology |
 | --- | --- |
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
-| UI + Client | Axios, Lucide React |
-| Backend | Python, FastAPI, Uvicorn, Pydantic |
-| AI brain + PDF vision | Google Gemini 2.5 Flash |
-| Fast inference + fallback | Groq Llama 3.1 8B Instant |
-| Memory | ChromaDB with Gemini Embeddings and offline fallback |
-| Data Layer | Supabase-ready config |
-| Documents | PyPDF2, python-multipart |
-| Deployment Target | Vercel for frontend, Railway or similar for backend |
-
-## Architecture
-
-```text
-User input
-  -> Master orchestrator
-    -> Symptom analyst
-    -> Report reader
-    -> Medication manager
-    -> Care coordinator
-    -> Emergency detector
-  -> Health memory layer
-  -> Family dashboard layer
-  -> User-facing outputs
-```
-
-The backend keeps agent routing separate from each agent's prompt and purpose,
-so the system can grow from keyword routing into richer model-based planning
-without changing the public API.
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS, Axios, Lucide |
+| Backend | Python, FastAPI, Pydantic, Uvicorn |
+| AI brain and PDF vision | Google Gemini Flash |
+| Emergency speed layer | Groq Llama 3.1 8B Instant |
+| Semantic memory | ChromaDB with Gemini embeddings |
+| Database and report storage | Supabase Postgres and Storage |
+| PDF output | ReportLab |
+| Deployment targets | Vercel frontend, Railway/Render backend |
 
 ## Project Structure
 
 ```text
-agents/      Specialist healthcare agent definitions
-backend/     FastAPI app, schemas, services, and requirements
-docs/        Architecture reference assets
-frontend/    Next.js dashboard
-memory/      ChromaDB storage adapter and memory notes
+agents/          Five specialist agent implementations
+backend/app/     FastAPI, schemas, services, and Supabase database layer
+backend/tests/   Database, API, and orchestration tests
+docs/            CareOS architecture diagram
+frontend/        Next.js care workspace
+memory/          ChromaDB semantic-memory adapter
+api.py           Deployment-friendly FastAPI entrypoint
+seed_data.py     Repeatable Supabase demo dataset
 ```
 
 ## Local Setup
 
-1. Install Node.js and Python 3.11+.
-2. Replace placeholder values in `.env` with real credentials.
-3. Install and run the backend:
+### 1. Configure credentials
+
+Copy `.env.example` to `.env`, then paste the keys into these fields:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+GROQ_API_KEY=your_groq_api_key
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_service_role_key
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+The backend must use the Supabase **service role** key. Never expose that key in
+the frontend or commit `.env`.
+
+Create a public Supabase Storage bucket named `reports`. The database expects
+the five tables described by the project architecture: `users`,
+`family_members`, `health_events`, `medications`, and `reports`.
+
+Run [`supabase_schema_fix.sql`](supabase_schema_fix.sql) once in the Supabase SQL
+editor. It fixes the live project's misspelled health-event foreign key and
+allows owner records without requiring a family member.
+
+### 2. Install and run the backend
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
+python seed_data.py
 uvicorn backend.app.main:app --reload
 ```
 
-4. Install and run the frontend:
+API docs are available at `http://localhost:8000/docs`.
+
+### 3. Install and run the frontend
 
 ```powershell
 cd frontend
@@ -97,88 +159,97 @@ npm install
 npm run dev
 ```
 
-5. Open the app:
+Open `http://localhost:3000`.
 
-```text
-Frontend: http://localhost:3000
-API docs: http://localhost:8000/docs
-Health check: http://localhost:8000/health
-```
+## Demo Dataset
 
-## API Surface
+`python seed_data.py` safely upserts a realistic owner profile:
 
-| Endpoint | Purpose |
+- **Ramesh Gupta**, 52, living with type 2 diabetes and hypertension
+- Five health events spread across the previous three months
+- Two lab reports showing an improving HbA1c and fasting glucose trend
+- Four active medications with dose, frequency, timing, and food guidance
+
+The deterministic demo user ID is `9000001`, matching the frontend demo
+profile and the live Supabase project's `bigint` identifiers.
+
+## How To Demo
+
+1. Start on **Chat** and ask: `I have mild tingling in both feet at night.`
+2. Show that CareOS uses Ramesh's existing diabetes history and routes the
+   message to the symptom analyst.
+3. Ask: `I have crushing chest pain and difficulty breathing.` Show the
+   emergency-first red alert and prominent `Call 112` action.
+4. Open **Reports**, expand both seeded reports, and highlight the improving
+   HbA1c trend. Upload a PDF to demonstrate Gemini report reading.
+5. Open **Medications**, review the four active medicines, then check an
+   interaction before adding a new medicine.
+6. Open **Family** to add or switch a dependent profile.
+7. Open **Profile** and download the doctor visit brief.
+
+## Main API Routes
+
+| Route | Purpose |
 | --- | --- |
-| `POST /api/chat` | Emergency-first multi-agent orchestration |
-| `POST /api/intents/classify` | Structured multi-intent classification |
-| `POST /api/memory/search` | User-scoped semantic health-memory search |
-| `POST /api/reports/read` | PDF extraction, interpretation, and memory storage |
-| `POST /api/medications` | Add, list, explain, or check medication interactions |
-| `GET /api/care-brief/{profile_id}` | Generate a printer-friendly care brief |
-| `GET /api/care-brief/{profile_id}/pdf` | Download the care brief as a PDF |
+| `POST /chat` | Emergency-first agent orchestration |
+| `POST /upload-report` | Store and analyze a PDF report |
+| `GET /reports/{user_id}` | List report history |
+| `POST /medications/check-interactions` | Check a new drug against active medicines |
+| `POST /medications/add` | Add an active medication |
+| `POST /family/add` | Add a dependent profile |
+| `GET /history/{user_id}` | Return the health event timeline |
+| `GET /doctor-brief/{user_id}` | Generate a doctor visit brief |
+| `GET /api/care-brief/{profile_id}/pdf` | Download the brief as PDF |
 
-## Environment Variables
+## Verification
 
-```env
-GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-GROQ_API_KEY=your_groq_key
-GROQ_MODEL=llama-3.1-8b-instant
-SUPABASE_URL=your_url
-SUPABASE_KEY=your_key
-CHROMA_PATH=memory/chroma
-NEXT_PUBLIC_API_URL=http://localhost:8000
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q backend\tests
+cd frontend
+npm run lint
+npm run build
 ```
 
-The committed `.env.example` shows the expected variables. The real `.env` file
-is intentionally ignored by Git.
+Current automated verification: **15 backend tests passing**, frontend lint
+passing, and the Next.js production build passing.
 
-### Provider Routing
+## What Is Already Done
 
-| Workload | Primary | Automatic fallback |
-| --- | --- | --- |
-| Intent classification, emergency reasoning, response merging | Gemini 2.5 Flash | Groq |
-| PDF report understanding | Gemini 2.5 Flash multimodal | Extracted-text fallback |
-| Fast specialist responses | Groq Llama 3.1 8B Instant | Gemini |
-| Semantic memory embeddings | Gemini Embeddings | Offline deterministic embeddings |
+- Gemini/Groq provider routing with emergency-first orchestration
+- Five focused healthcare agents and multi-intent routing
+- User and family-member scoped Supabase health records
+- Semantic health-memory retrieval through ChromaDB
+- Gemini PDF report analysis with report history comparison
+- Medication creation and AI interaction checks
+- Downloadable doctor visit brief
+- Mobile-first five-tab frontend with voice input and emergency overlay
+- Live Supabase-compatible demo seed and schema migration
+- Loading, empty, progress, and error states across primary workflows
+- Backend API/database tests and frontend production verification
 
-When Supabase is configured, CareOS expects `medications` and
-`emergency_alerts` tables. Local development continues with safe fallbacks if
-Supabase or those tables are unavailable.
+## Work Required Next
 
-## Implemented So Far
+### Before a Public Demo
 
-- Full project scaffold matching the requested architecture.
-- Next.js dashboard with specialist agent navigation and chat input.
-- FastAPI APIs for chat, memory search, report reading, medications, and briefs.
-- Emergency-first master orchestrator and structured intent classifier.
-- Five dedicated specialist agent implementations.
-- Gemini-first reasoning and Groq-first fast-inference provider router.
-- Automatic Gemini/Groq provider fallback when one API is unavailable.
-- Emergency red-flag detection with structured severity and immediate steps.
-- ChromaDB semantic search using deterministic offline embeddings.
-- PDF report extraction and report-memory storage.
-- Supabase medication repository with a local development fallback.
-- Printer-friendly care brief and downloadable PDF generation.
-- Project README, env template, dependency files, and Git ignore rules.
+- Deploy the FastAPI backend and configure `NEXT_PUBLIC_API_URL` in Vercel
+- Confirm the Supabase `reports` bucket permissions and upload workflow
+- Add one realistic sample PDF report to the demo assets
+- Test Gemini and Groq quotas from the deployed environment
+- Run the complete demo script on both mobile and desktop
 
-## Roadmap
+### Before Real Users
 
-- Add richer structured extraction for PDF lab tables.
-- Expand classifier evaluation and multi-intent routing tests.
-- Add Supabase schema for profiles, family members, medications, and alerts.
-- Generate downloadable doctor briefs.
-- Add medication reminder and proactive nudge scheduling.
-- Build family dashboard views for dependent profiles.
-- Add authentication and role-based access.
-- Add automated tests for orchestration, emergency detection, and memory.
-- Prepare Vercel and Railway deployment configs.
+- Add Supabase Auth and remove the hard-coded demo user
+- Enable and test row-level security for every table and storage object
+- Add explicit consent, data deletion, and emergency-contact notification flows
+- Encrypt sensitive fields and define retention and audit-log policies
+- Add clinician-reviewed prompt evaluations and emergency false-negative tests
+- Add medication reminder scheduling and notification delivery
+- Add observability, rate limits, provider-failure monitoring, and retries
+- Complete clinical, privacy, security, and regulatory review
 
-## Safety Notice
+## Safety and Production Gaps
 
-CareOS is an informational assistant and prototype, not a medical device. It
-must not diagnose, prescribe, or delay emergency care. For urgent symptoms,
-users should contact local emergency services immediately. Production use would
-require clinical review, privacy review, security hardening, and regulatory
-assessment.
+Before real-world use, CareOS would require authentication, row-level security,
+encryption and retention policies, clinical validation, audit logging, consent
+flows, monitoring, and regulatory/privacy review.
