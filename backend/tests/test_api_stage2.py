@@ -37,6 +37,54 @@ def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
     assert calls["event"]["ai_response"] == "Track symptoms."
 
 
+def test_chat_returns_response_when_event_save_temporarily_fails(monkeypatch) -> None:
+    monkeypatch.setattr(db, "get_health_history", lambda *args: "Recent headache")
+    monkeypatch.setattr(db, "get_medications", lambda *args: [])
+
+    async def run(*args, **kwargs):
+        return ChatResponse(
+            message="Track symptoms.",
+            intents=["symptom_analysis"],
+            agents_used=["emergency_detector", "symptom_analyst"],
+            results=[AgentResult(agent="symptom_analyst", summary="Track symptoms.")],
+        )
+
+    monkeypatch.setattr(api.orchestrator, "run", run)
+    monkeypatch.setattr(db, "save_health_event", lambda **kwargs: (_ for _ in ()).throw(OSError("offline")))
+
+    response = client.post("/chat", json={"message": "Headache", "profile_id": "user-1"})
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Track symptoms."
+
+
+def test_general_conversation_does_not_load_health_history(monkeypatch) -> None:
+    monkeypatch.setattr(
+        db,
+        "get_health_history",
+        lambda *args: (_ for _ in ()).throw(AssertionError("history should not load")),
+    )
+    monkeypatch.setattr(
+        db,
+        "get_medications",
+        lambda *args: (_ for _ in ()).throw(AssertionError("medications should not load")),
+    )
+    monkeypatch.setattr(
+        db,
+        "save_health_event",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("casual chat should not save")),
+    )
+
+    response = client.post(
+        "/chat",
+        json={"message": "Can we talk in Hindi?", "profile_id": "user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intents"] == []
+    assert "हिंदी" in response.json()["message"]
+
+
 def test_upload_report_stores_file_and_report_row(monkeypatch) -> None:
     calls: dict[str, object] = {}
     monkeypatch.setattr(db, "upload_report_file", lambda *args: "https://files/report.pdf")

@@ -25,6 +25,7 @@ from backend.app.schemas import (
     InteractionCheckResponse,
 )
 from backend.app.services.intent_classifier import classify_intent
+from backend.app.services.input_understanding import understand_input
 from backend.app.services.orchestrator import Orchestrator
 from backend.app.config import settings
 
@@ -53,30 +54,45 @@ async def health() -> dict[str, str | bool]:
 @app.post("/api/chat", response_model=ChatResponse, include_in_schema=False)
 async def chat(request: ChatRequest) -> ChatResponse:
     try:
-        history = db.get_health_history(request.profile_id, request.family_member_id)
-        medications = db.get_medications(request.profile_id, request.family_member_id)
+        understanding = understand_input(request.message)
+        history = None
+        medications = None
+        if understanding.kind == "healthcare":
+            try:
+                history = db.get_health_history(request.profile_id, request.family_member_id)
+                medications = db.get_medications(request.profile_id, request.family_member_id)
+            except Exception:
+                # Temporary Supabase failures should not make basic guidance unavailable.
+                history = "Health history is temporarily unavailable."
+                medications = []
+
         response = await orchestrator.run(
             request.message,
             request.profile_id,
             health_history=history,
             current_medications=medications,
         )
-        db.save_health_event(
-            user_id=request.profile_id,
-            family_member_id=request.family_member_id,
-            event_type=response.intents[0] if response.intents else "chat",
-            description=request.message,
-            ai_response=response.message,
-            severity=(
-                response.emergency_details.severity
-                if response.emergency_details
-                else "none"
-            ),
-            body_part=None,
-        )
+        if understanding.kind == "healthcare" or response.emergency:
+            try:
+                db.save_health_event(
+                    user_id=request.profile_id,
+                    family_member_id=request.family_member_id,
+                    event_type=response.intents[0] if response.intents else "chat",
+                    description=request.message,
+                    ai_response=response.message,
+                    severity=(
+                        response.emergency_details.severity
+                        if response.emergency_details
+                        else "none"
+                    ),
+                    body_part=None,
+                )
+            except Exception:
+                # Preserve the response when event persistence fails transiently.
+                pass
         return response
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Database operation failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"CareOS processing failed: {exc}") from exc
 
 
 @app.post("/api/intents/classify", response_model=IntentClassificationResponse)

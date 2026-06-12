@@ -15,6 +15,8 @@ import {
   Plus,
   Phone,
   Pill,
+  Volume2,
+  VolumeX,
   Send,
   UploadCloud,
   UserRound,
@@ -50,7 +52,7 @@ type ChatMessage = {
 };
 
 type Profile = {
-  id: string;
+  id: string | number;
   name: string;
   age?: number;
   gender?: string;
@@ -58,7 +60,7 @@ type Profile = {
   known_conditions?: string[];
   allergies?: string[];
   emergency_contact?: string;
-  emergency_contacts?: string[];
+  emergency_contacts?: string | string[];
   relation?: string;
 };
 
@@ -146,7 +148,8 @@ export default function Home() {
       .finally(() => setProfilesLoading(false));
   }, []);
 
-  const familyMemberId = activeProfile.id === OWNER_ID ? undefined : activeProfile.id;
+  const activeProfileId = String(activeProfile.id);
+  const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
@@ -184,13 +187,16 @@ export default function Home() {
           },
         );
       }
-    } catch {
+    } catch (error) {
+      const detail = axios.isAxiosError(error) && error.response?.data?.detail;
       setMessages((current) => [
         ...current,
         {
           id: crypto.randomUUID(),
           speaker: "system",
-          text: "CareOS could not reach the health service. Please try again.",
+          text: typeof detail === "string"
+            ? `CareOS service error: ${detail}`
+            : "CareOS could not reach the health service. Please try again.",
         },
       ]);
     } finally {
@@ -393,6 +399,36 @@ function ChatScreen({
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.speaker === "user";
   const isSystem = message.speaker === "system";
+  const [speaking, setSpeaking] = useState(false);
+
+  useEffect(() => {
+    return () => window.speechSynthesis?.cancel();
+  }, []);
+
+  function toggleSpeech() {
+    if (!("speechSynthesis" in window)) return;
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message.text);
+    const isHindi = /[\u0900-\u097f]/.test(message.text);
+    const language = isHindi ? "hi-IN" : "en-US";
+    const voices = window.speechSynthesis.getVoices();
+    utterance.lang = language;
+    utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === language.toLowerCase())
+      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(isHindi ? "hi" : "en"))
+      ?? null;
+    utterance.rate = 0.95;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  }
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -405,7 +441,18 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         }`}
       >
         {!isUser && !isSystem && (
-          <p className="mb-1 text-xs font-semibold text-[#12664f]">CareOS</p>
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold text-[#12664f]">CareOS</p>
+            <button
+              type="button"
+              onClick={toggleSpeech}
+              aria-label={speaking ? "Stop voice output" : "Read response aloud"}
+              title={speaking ? "Stop voice output" : "Read response aloud"}
+              className="grid size-7 shrink-0 place-items-center rounded-md text-[#597269] hover:bg-[#e4efea]"
+            >
+              {speaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
+          </div>
         )}
         <p className="whitespace-pre-wrap">{message.text}</p>
         {!!message.agents?.length && (
@@ -712,10 +759,10 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
     <ScreenShell title="Family profiles" description="Switch profiles to manage care for dependents.">
       <div className="grid gap-3 sm:grid-cols-2">
         {[owner, ...family].map((profile) => (
-          <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-md border p-4 text-left ${activeProfile.id === profile.id ? "border-[#12664f] bg-[#f1f8f5]" : "border-[#dfe8e4]"}`}>
+          <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-md border p-4 text-left ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] bg-[#f1f8f5]" : "border-[#dfe8e4]"}`}>
             <UserRound size={19} className="text-[#12664f]" />
             <p className="mt-3 text-sm font-semibold">{profile.name}</p>
-            <p className="mt-1 text-xs text-[#687971]">{profile.id === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
+            <p className="mt-1 text-xs text-[#687971]">{String(profile.id) === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
             <p className="mt-2 text-xs text-[#687971]">{profile.known_conditions?.join(", ") || "No known conditions"}</p>
           </button>
         ))}
@@ -767,7 +814,7 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
         <ProfileField label="Age" value={profile.age} />
         <ProfileField label="Gender" value={profile.gender} />
         <ProfileField label="Blood group" value={profile.blood_group} />
-        <ProfileField label="Emergency contact" value={profile.emergency_contact ?? profile.emergency_contacts?.join(", ")} />
+        <ProfileField label="Emergency contact" value={profile.emergency_contact ?? formatList(profile.emergency_contacts)} />
       </div>
       <ProfileField label="Known conditions" value={profile.known_conditions?.join(", ")} />
       <ProfileField label="Allergies" value={profile.allergies?.join(", ")} />
@@ -810,6 +857,10 @@ function ServiceNotice({ loading, error }: { loading: boolean; error: string }) 
 
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleDateString() : "Date unavailable";
+}
+
+function formatList(value?: string | string[]) {
+  return Array.isArray(value) ? value.join(", ") : value;
 }
 
 function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {

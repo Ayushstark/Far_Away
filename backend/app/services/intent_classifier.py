@@ -4,7 +4,8 @@ from backend.app.services.llm import complete_json
 INTENT_KEYWORDS: dict[IntentName, tuple[str, ...]] = {
     "symptom_analysis": (
         "pain", "fever", "cough", "symptom", "feel", "sick", "headache",
-        "vomit", "rash", "dizzy", "weak",
+        "vomit", "rash", "dizzy", "weak", "hurt", "ache", "tired", "tingling",
+        "nausea", "bleeding", "breathing", "stomach", "chest", "injury",
     ),
     "report_reading": ("report", "lab", "blood test", "pdf", "scan", "result"),
     "medication_management": (
@@ -27,11 +28,13 @@ def classify_intent_fallback(message: str) -> list[IntentName]:
         for intent, keywords in INTENT_KEYWORDS.items()
         if any(keyword in text for keyword in keywords)
     ]
-    return intents or ["symptom_analysis"]
+    return intents
 
 
 async def classify_intent(message: str) -> list[IntentName]:
     fallback = classify_intent_fallback(message)
+    if not fallback:
+        return []
     result = await complete_json(
         "You classify healthcare requests for a multi-agent assistant.",
         f"""

@@ -1,6 +1,7 @@
 from typing import Any
 
 from backend.app.services.llm import complete
+from backend.app.services.language import response_language_instruction
 
 
 class MedicationManager:
@@ -17,6 +18,7 @@ Medicine the patient wants to add: {new_drug}
 Identify potentially important interactions or duplicate therapies in simple
 language. Tell the user to confirm with a pharmacist or doctor before taking it.
 Do not claim the list is exhaustive.
+{response_language_instruction(new_drug)}
 """,
             )
             return response or (
@@ -32,6 +34,7 @@ Do not claim the list is exhaustive.
 Explain what {drug} commonly does in 3 simple sentences. Include why it may be
 prescribed, common side effects to watch for, and a reminder to follow the
 prescriber's instructions.
+{response_language_instruction(drug)}
 """,
             )
             return response or (

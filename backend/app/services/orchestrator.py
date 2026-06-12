@@ -5,8 +5,46 @@ from agents.symptom import analyze_symptoms
 from backend.app.schemas import AgentResult, ChatResponse, IntentName
 from backend.app.services.intent_classifier import classify_intent
 from backend.app.services.emergency_notifier import EmergencyNotifier
+from backend.app.services.language import wants_hindi
+from backend.app.services.input_understanding import understand_input
 from backend.app.services.response_merger import merge_responses
 from memory.store import HealthMemory
+
+CASUAL_MESSAGES = {
+    "hi",
+    "hello",
+    "hey",
+    "hii",
+    "hiii",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "thanks",
+    "thank you",
+    "how are you",
+    "hello how are you",
+    "hi how are you",
+    "what can you do",
+    "who are you",
+    "okay",
+    "ok",
+    "bye",
+}
+
+
+def is_casual_message(message: str) -> bool:
+    normalized = " ".join(
+        message.strip().lower().translate(str.maketrans("", "", "!?.,")).split()
+    )
+    for token in ("reply in hindi", "respond in hindi", "hindi mein", "hindi me"):
+        normalized = normalized.replace(token, "").strip()
+    return normalized in CASUAL_MESSAGES
+
+
+def casual_response(message: str) -> str:
+    if wants_hindi(message):
+        return "नमस्ते! मैं ठीक हूँ। आज मैं आपकी स्वास्थ्य संबंधी किस तरह सहायता कर सकता हूँ?"
+    return "Hello! I am doing well. How can I help you today?"
 
 
 class Orchestrator:
@@ -25,8 +63,6 @@ class Orchestrator:
         health_history: str | None = None,
         current_medications: list[dict] | None = None,
     ) -> ChatResponse:
-        history = [health_history] if health_history else self.memory.recall(profile_id, message)
-
         # Emergency screening always runs first and can short-circuit all other work.
         emergency = await assess_emergency(message)
         if emergency.is_emergency:
@@ -50,10 +86,47 @@ class Orchestrator:
                 emergency_details=emergency,
             )
 
+        understanding = understand_input(message)
+        if understanding.kind == "language_request":
+            return ChatResponse(
+                message="हाँ, बिल्कुल। मैं आपसे हिंदी में बात कर सकता हूँ। आप क्या जानना चाहते हैं?",
+                intents=[],
+                agents_used=["emergency_detector"],
+                results=[],
+            )
+
+        if understanding.kind == "casual" or is_casual_message(message):
+            return ChatResponse(
+                message=casual_response(message),
+                intents=[],
+                agents_used=["emergency_detector"],
+                results=[],
+            )
+
+        if understanding.kind == "unclear":
+            return ChatResponse(
+                message=(
+                    "I want to make sure I understand correctly. Are you asking about "
+                    "a symptom, medicine, medical report, or doctor visit?"
+                ),
+                intents=[],
+                agents_used=["emergency_detector"],
+                results=[],
+            )
+
+        history = [health_history] if health_history else self.memory.recall(profile_id, message)
         intents = await classify_intent(message)
         actionable = [intent for intent in intents if intent != "emergency_detection"]
         if not actionable:
-            actionable = ["symptom_analysis"]
+            return ChatResponse(
+                message=(
+                    "Please share a little more detail about the health concern so I "
+                    "can choose the right care agent."
+                ),
+                intents=[],
+                agents_used=["emergency_detector"],
+                results=[],
+            )
 
         results: list[AgentResult] = []
         for intent in actionable:

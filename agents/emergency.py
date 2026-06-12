@@ -9,6 +9,11 @@ CRITICAL_FLAGS = {
     "unconscious": "loss of consciousness",
     "severe bleeding": "severe bleeding",
     "stroke": "possible stroke symptoms",
+    "heart attack": "possible heart attack",
+    "seizure": "possible seizure",
+    "choking": "possible choking",
+    "suicidal": "immediate mental-health emergency",
+    "kill myself": "immediate mental-health emergency",
     "overdose": "possible overdose",
     "poisoning": "possible poisoning",
 }
@@ -56,6 +61,22 @@ Return:
     try:
         assessment = EmergencyAssessment.model_validate(result)
     except Exception:
+        assessment = fallback
+
+    # Reject contradictory model output such as emergency=true with no severity
+    # or no valid Indian emergency number.
+    if (
+        assessment.is_emergency
+        and (
+            assessment.severity == "none"
+            or assessment.call_number not in {"112", "108", "112 or 108"}
+        )
+    ):
+        assessment = fallback
+
+    # Do not let a model turn ordinary conversation into an emergency. The
+    # deterministic red-flag screen remains the safety authority.
+    if assessment.is_emergency and not fallback.is_emergency:
         assessment = fallback
 
     # Never allow an LLM response to downgrade a deterministic critical flag.
