@@ -247,11 +247,11 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-dvh bg-[#edf3f0] text-[#17211d]">
-      <div className="mx-auto flex min-h-dvh max-w-6xl bg-white shadow-sm">
+    <main className="h-dvh bg-[#f8faf9] text-[#17211d]">
+      <div className="mx-auto flex h-screen max-w-7xl overflow-hidden bg-white md:my-4 md:h-[calc(100vh-32px)] md:rounded-2xl md:border md:border-[#dfe8e4] md:shadow-xl">
         <DesktopNavigation active={tab} onChange={setTab} />
 
-        <section className="relative flex min-h-dvh min-w-0 flex-1 flex-col pb-20 md:pb-0">
+        <section className="relative flex h-full min-w-0 flex-1 flex-col">
           <Header tab={tab} activeProfile={activeProfile} />
           {(profilesLoading || profileError) && (
             <ServiceNotice loading={profilesLoading} error={profileError} />
@@ -295,7 +295,7 @@ export default function Home() {
 
 function Header({ tab, activeProfile }: { tab: Tab; activeProfile: Profile }) {
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#dfe8e4] px-4 sm:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#f1f5f3] px-4 sm:px-6">
       <div className="flex items-center gap-3">
         <span className="grid size-9 place-items-center rounded-md bg-[#12664f] text-white">
           <HeartPulse size={20} />
@@ -336,57 +336,56 @@ function ChatScreen({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-8">
-        <div className="mx-auto flex max-w-3xl flex-col gap-4">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
           <div className="mb-2">
-            <h1 className="text-xl font-semibold">How are you feeling today?</h1>
-            <p className="mt-1 text-sm text-[#687971]">
-              CareOS checks every message for urgent warning signs first.
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">How are you feeling today?</h1>
+            <p className="mt-1 text-sm text-[#687971]">Describe your symptoms or ask about your health history.</p>
           </div>
           {messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
           {loading && <TypingIndicator />}
-          <div ref={conversationEnd} />
+          <div ref={conversationEnd} className="h-4" />
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-[#dfe8e4] bg-white px-3 py-3 sm:px-8">
-        <form onSubmit={onSend} className="mx-auto flex max-w-3xl items-end gap-2">
-          <button
-            type="button"
-            onClick={onVoice}
-            aria-label={listening ? "Stop voice input" : "Start voice input"}
-            title={listening ? "Stop voice input" : "Start voice input"}
-            className={`grid size-11 shrink-0 place-items-center rounded-md border transition ${
-              listening
-                ? "border-[#c4432b] bg-[#fff0ec] text-[#b53521]"
-                : "border-[#cfdad5] text-[#566a60] hover:bg-[#f1f6f3]"
-            }`}
-          >
-            {listening ? <MicOff size={19} /> : <Mic size={19} />}
-          </button>
-          <textarea
-            value={input}
-            onChange={(event) => onInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            rows={1}
-            placeholder={listening ? "Listening..." : "Describe symptoms or ask a health question"}
-            className="max-h-32 min-h-11 flex-1 resize-none rounded-md border border-[#cfdad5] px-3 py-2.5 text-sm outline-none transition focus:border-[#12664f]"
-          />
-          <button
-            disabled={!input.trim() || loading}
-            aria-label="Send message"
-            title="Send message"
-            className="grid size-11 shrink-0 place-items-center rounded-md bg-[#12664f] text-white transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Send size={18} />
-          </button>
+      <div className="shrink-0 bg-white px-4 pb-6 pt-2 sm:px-8">
+        <form
+          onSubmit={onSend}
+          className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-[#dfe8e4] bg-[#fcfdfe] p-2 transition-all focus-within:border-[#12664f] focus-within:ring-4 focus-within:ring-[#12664f]/5 shadow-sm"
+        >
+           <button
+              type="button"
+              onClick={onVoice}
+              aria-label={listening ? "Stop voice" : "Voice input"}
+              className={`grid size-10 shrink-0 place-items-center rounded-xl transition ${
+                listening
+                  ? "bg-red-50 text-red-600 animate-pulse"
+                  : "text-[#566a60] hover:bg-gray-100"
+              }`}
+            >
+              {listening ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+            <textarea
+              value={input}
+              onChange={(event) => onInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              rows={1}
+              placeholder={listening ? "Listening..." : "Type your message..."}
+              className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm outline-none placeholder:text-gray-400"
+            />
+            <button
+              disabled={!input.trim() || loading}
+              aria-label="Send"
+              className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#12664f] text-white transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <Send size={18} />
+            </button>
         </form>
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-[#809087]">
           CareOS provides general health information, not a diagnosis.
@@ -432,15 +431,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[88%] rounded-md px-4 py-3 text-sm leading-6 sm:max-w-[75%] ${
+        className={`max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-6 sm:max-w-[80%] ${
           isUser
-            ? "bg-[#12664f] text-white"
+            ? "bg-[#12664f] text-white rounded-tr-none"
             : isSystem
-              ? "border border-[#e0b562] bg-[#fff8e8] text-[#6f5015]"
-              : "border border-[#dfe8e4] bg-[#f4f8f6] text-[#24322c]"
+              ? "border border-amber-100 bg-amber-50 text-amber-900"
+              : "bg-[#f1f5f3] text-[#24322c] rounded-tl-none"
         }`}
       >
-        {!isUser && !isSystem && (
+        {!isUser && !isSystem && ( 
           <div className="mb-1 flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-[#12664f]">CareOS</p>
             <button
@@ -448,7 +447,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               onClick={toggleSpeech}
               aria-label={speaking ? "Stop voice output" : "Read response aloud"}
               title={speaking ? "Stop voice output" : "Read response aloud"}
-              className="grid size-7 shrink-0 place-items-center rounded-md text-[#597269] hover:bg-[#e4efea]"
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-[#597269] hover:bg-white/50"
             >
               {speaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
@@ -468,7 +467,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 function TypingIndicator() {
   return (
     <div className="flex justify-start" aria-label="CareOS is typing">
-      <div className="flex h-10 items-center gap-1 rounded-md border border-[#dfe8e4] bg-[#f4f8f6] px-4">
+      <div className="flex h-10 items-center gap-1 rounded-2xl bg-[#f1f5f3] px-5">
         {[0, 1, 2].map((dot) => (
           <span
             key={dot}
@@ -865,18 +864,18 @@ function formatList(value?: string | string[]) {
 
 function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <aside className="hidden w-56 shrink-0 border-r border-[#dfe8e4] bg-[#f6f9f7] p-4 md:block">
-      <p className="px-2 py-3 text-xs font-semibold uppercase text-[#71827a]">Workspace</p>
-      <nav className="mt-2 space-y-1">
+    <aside className="hidden h-full w-64 shrink-0 overflow-y-auto border-r border-[#f1f5f3] bg-white p-6 md:block">
+      <div className="mb-8 flex items-center gap-2 px-2 font-bold text-[#12664f]">
+         <HeartPulse size={22} />
+         <span className="text-lg">CareOS</span>
+      </div>
+      <nav className="space-y-1.5">
         {navigation.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-medium ${
-              active === id
-                ? "bg-white text-[#12664f] shadow-sm"
-                : "text-[#596b62] hover:bg-white"
-            }`}
+            className={`flex h-11 w-full items-center gap-3 rounded-xl px-4 text-sm font-medium transition-all ${
+              active === id ? "bg-[#f1f8f5] text-[#12664f]" : "text-[#596b62] hover:bg-gray-50"}`}
           >
             <Icon size={18} />
             {label}
