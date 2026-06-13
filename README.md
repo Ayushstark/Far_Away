@@ -21,7 +21,8 @@ specialist AI agents and a shared health timeline.
 
 ## Current Stage
 
-**Stage 5 complete: the end-to-end hackathon MVP is ready for demonstration.**
+**Stage 5 plus the proactive companion upgrade is complete. The end-to-end
+hackathon MVP is ready for demonstration.**
 
 - Supabase database layer for users, family, events, medications, and reports
 - Emergency-first orchestrator with five specialist agents
@@ -29,6 +30,9 @@ specialist AI agents and a shared health timeline.
 - Responsive Next.js interface with voice-enabled chat and emergency overlay
 - Report, medication, family, and profile workflows
 - Repeatable Ramesh Gupta demo dataset, loading states, error handling, and tests
+- Indian-accent Hindi/English gTTS output with Hindi/English speech input
+- Proactive greetings, daily insight cards, and unresolved-symptom follow-ups
+- Visible multi-agent thinking trail and autonomous medication/specialist checks
 
 ### Build Progress
 
@@ -39,6 +43,7 @@ specialist AI agents and a shared health timeline.
 | 3 | Core layout, chat, voice input, and emergency UI | Complete |
 | 4 | Reports, medications, family, and profile screens | Complete |
 | 5 | Demo data, interface polish, tests, and documentation | Complete |
+| Companion upgrade | gTTS, proactive greeting, agent trail, follow-up loop, daily digest | Complete |
 
 ## Five-Agent Architecture
 
@@ -52,9 +57,12 @@ flowchart LR
     O --> R["Report reader"]
     O --> M["Medication manager"]
     O --> C["Care coordinator"]
+    O --> TRAIL["Agent thinking trail"]
     S & R & M & C --> DB["Supabase health timeline"]
     O --> MEM["ChromaDB semantic memory<br/>Gemini embeddings"]
     DB & MEM --> UI["Next.js care workspace"]
+    DB --> PRO["Proactive greeting + daily insights"]
+    PRO --> UI
 ```
 
 The emergency detector runs before all other agents on every chat message.
@@ -82,6 +90,10 @@ sequenceDiagram
         UI-->>User: Full-screen red alert
     else No emergency
         API->>Gemini: Classify intent and call specialist agents
+        opt Recurring or moderate/high symptom
+            API->>Gemini: Check medication side effects
+            API->>Gemini: Find appropriate specialist
+        end
         Gemini-->>API: Plain-language care guidance
         API->>Data: Save health event
         API-->>UI: Merged CareOS response
@@ -99,6 +111,8 @@ sequenceDiagram
 | Semantic memory | ChromaDB with Gemini embeddings |
 | Database and report storage | Supabase Postgres and Storage |
 | PDF output | ReportLab |
+| Voice output | gTTS streaming MP3 with Indian English/Hindi accent |
+| Voice input | Browser Web Speech API (`en-IN` / `hi-IN`) |
 | Deployment targets | Vercel frontend, Railway/Render backend |
 
 ## Project Structure
@@ -186,12 +200,22 @@ profile and the live Supabase project's `bigint` identifiers.
    interaction before adding a new medicine.
 6. Open **Family** to add or switch a dependent profile.
 7. Open **Profile** and download the doctor visit brief.
+8. Refresh Chat to hear CareOS speak first, then select **हिंदी** to show the
+   Hindi greeting, Hindi chat, and Hindi voice output.
+9. Ask `My headache is happening again and getting worse` to show the animated
+   symptom, medication, and specialist agent trail.
+10. Answer an unresolved-symptom greeting with `better now` to show CareOS
+    closing the follow-up loop.
+11. Tap a daily insight card to send it directly into the conversation.
 
 ## Main API Routes
 
 | Route | Purpose |
 | --- | --- |
 | `POST /chat` | Emergency-first agent orchestration |
+| `GET /greeting/{user_id}` | Generate a contextual proactive greeting |
+| `GET /daily-digest/{user_id}` | Generate today's health insight cards |
+| `POST /text-to-speech` | Stream Hindi or English CareOS speech as MP3 |
 | `POST /upload-report` | Store and analyze a PDF report |
 | `GET /reports/{user_id}` | List report history |
 | `POST /medications/check-interactions` | Check a new drug against active medicines |
@@ -210,8 +234,8 @@ npm run lint
 npm run build
 ```
 
-Current automated verification: **15 backend tests passing**, frontend lint
-passing, and the Next.js production build passing.
+Current automated verification: **32 backend tests passing**, frontend lint
+and TypeScript checks passing.
 
 ## What Is Already Done
 
@@ -223,6 +247,11 @@ passing, and the Next.js production build passing.
 - Medication creation and AI interaction checks
 - Downloadable doctor visit brief
 - Mobile-first five-tab frontend with voice input and emergency overlay
+- Hindi/English gTTS voice output and language-aware chat
+- Proactive contextual greeting that speaks first
+- Autonomous symptom-to-medication-to-specialist agent chain
+- Follow-up memory loop that resolves the originating health event
+- Daily medication, trend, follow-up, and report insight cards
 - Live Supabase-compatible demo seed and schema migration
 - Loading, empty, progress, and error states across primary workflows
 - Backend API/database tests and frontend production verification
@@ -244,7 +273,7 @@ passing, and the Next.js production build passing.
 - Add explicit consent, data deletion, and emergency-contact notification flows
 - Encrypt sensitive fields and define retention and audit-log policies
 - Add clinician-reviewed prompt evaluations and emergency false-negative tests
-- Add medication reminder scheduling and notification delivery
+- Add server-scheduled push/SMS medication reminder delivery
 - Add observability, rate limits, provider-failure monitoring, and retries
 - Complete clinical, privacy, security, and regulatory review
 

@@ -6,6 +6,25 @@ from backend.app.services.language import response_language_instruction
 
 class MedicationManager:
     async def run(self, action: str, data: dict[str, Any], user_id: str) -> str:
+        if action == "side_effects":
+            medications = data.get("current_medications") or []
+            symptom = str(data.get("symptom") or "").strip()
+            response = await complete(
+                "You provide cautious medication safety information. Never diagnose or tell a patient to stop medicine.",
+                f"""
+Current medications: {medications}
+Current symptom: {symptom}
+
+Briefly explain whether any listed medication can sometimes be associated with
+this symptom. Tell the patient not to stop medication without speaking to their
+doctor or pharmacist.
+{response_language_instruction(symptom)}
+""",
+            )
+            return response or (
+                "A doctor or pharmacist should review whether current medicines could be contributing. Do not stop a prescribed medicine without their advice."
+            )
+
         if action == "check_interactions":
             medications = data.get("current_medications") or []
             new_drug = str(data.get("new_drug") or "").strip()

@@ -75,6 +75,63 @@ def get_health_history(
     return "\n\n".join(events)
 
 
+def get_recent_health_events(
+    user_id: str,
+    family_member_id: str | None = None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Return raw recent events when an agent needs structured context."""
+    query = (
+        get_client()
+        .table("health_events")
+        .select(
+            "id,event_type,description,ai_response,severity,body_part,resolved,created_at"
+        )
+        .eq("user_id", user_id)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
+def get_unresolved_events(
+    user_id: str,
+    family_member_id: str | None = None,
+    limit: int = 1,
+) -> list[dict[str, Any]]:
+    """Return recent unresolved symptoms so CareOS can close the loop later."""
+    query = (
+        get_client()
+        .table("health_events")
+        .select("id,event_type,description,severity,body_part,resolved,created_at")
+        .eq("user_id", user_id)
+        .in_("event_type", ["symptom", "symptom_analysis"])
+        .eq("resolved", False)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
+def mark_event_resolved(event_id: str | int) -> dict[str, Any]:
+    response = (
+        get_client()
+        .table("health_events")
+        .update({"resolved": True})
+        .eq("id", event_id)
+        .execute()
+    )
+    return _first_row(response.data)
+
+
 def save_health_event(
     user_id: str,
     event_type: str,
@@ -242,13 +299,23 @@ def upload_report_file(user_id: str, filename: str, content: bytes) -> str:
     """Upload a PDF to the reports bucket and return its stored URL."""
     safe_name = filename.replace("\\", "_").replace("/", "_")
     path = f"{user_id}/{date.today().isoformat()}-{safe_name}"
-    bucket = get_client().storage.from_("reports")
+    storage = get_client().storage
+    if not any(bucket.name == "reports" for bucket in storage.list_buckets()):
+        storage.create_bucket(
+            "reports",
+            options={
+                "public": False,
+                "allowed_mime_types": ["application/pdf"],
+                "file_size_limit": 10 * 1024 * 1024,
+            },
+        )
+    bucket = storage.from_("reports")
     bucket.upload(
         path,
         content,
         file_options={"content-type": "application/pdf", "upsert": "true"},
     )
-    return bucket.get_public_url(path)
+    return path
 
 
 def _scope_family_member(query: Any, family_member_id: str | None) -> Any:

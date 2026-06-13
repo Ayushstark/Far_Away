@@ -29,6 +29,10 @@ class FakeQuery:
         self.client.calls.append((self.table, "eq", column, value))
         return self
 
+    def in_(self, column: str, values: list[Any]) -> "FakeQuery":
+        self.client.calls.append((self.table, "in", column, values))
+        return self
+
     def is_(self, column: str, value: Any) -> "FakeQuery":
         self.client.calls.append((self.table, "is", column, value))
         return self
@@ -43,6 +47,11 @@ class FakeQuery:
 
     def insert(self, payload: dict[str, Any]) -> "FakeQuery":
         self.client.calls.append((self.table, "insert", payload))
+        self.inserted = payload
+        return self
+
+    def update(self, payload: dict[str, Any]) -> "FakeQuery":
+        self.client.calls.append((self.table, "update", payload))
         self.inserted = payload
         return self
 
@@ -93,6 +102,29 @@ def test_get_medications_scopes_family_member(monkeypatch) -> None:
     assert result == rows
     assert ("medications", "eq", "is_active", True) in client.calls
     assert ("medications", "eq", "family_member_id", "family-1") in client.calls
+
+
+def test_get_recent_health_events_returns_structured_context(monkeypatch) -> None:
+    rows = [{"id": "event-1", "description": "Headache", "resolved": False}]
+    client = FakeClient({"health_events": rows})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.get_recent_health_events("user-1", limit=5)
+
+    assert result == rows
+    assert ("health_events", "is", "family_member_id", "null") in client.calls
+    assert ("health_events", "limit", 5) in client.calls
+
+
+def test_unresolved_events_and_resolution_update(monkeypatch) -> None:
+    rows = [{"id": "event-1", "description": "Headache", "resolved": False}]
+    client = FakeClient({"health_events": rows})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    assert db.get_unresolved_events("user-1") == rows
+    assert db.mark_event_resolved("event-1") == {"resolved": True}
+    assert ("health_events", "eq", "resolved", False) in client.calls
+    assert ("health_events", "update", {"resolved": True}) in client.calls
 
 
 def test_add_medication_uses_final_supabase_schema(monkeypatch) -> None:

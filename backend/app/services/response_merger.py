@@ -2,7 +2,7 @@ from backend.app.schemas import AgentResult
 from backend.app.services.llm import complete
 
 
-async def merge_responses(results: list[AgentResult]) -> str:
+async def merge_responses(results: list[AgentResult], preferred_language: str = "en") -> str:
     if not results:
         return "Please share a little more detail so CareOS can route your request."
     if len(results) == 1:
@@ -14,6 +14,7 @@ async def merge_responses(results: list[AgentResult]) -> str:
         f"""
 Combine these specialist responses into one concise, organized answer. Preserve
 all safety disclaimers and avoid diagnosis:
+Reply entirely in {"fluent Hindi using Devanagari" if preferred_language == "hi" else "natural English"}.
 
 {combined}
 """,

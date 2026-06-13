@@ -20,6 +20,38 @@ body {
   animation: typing-pulse 1s ease-in-out infinite;
 }
 
+.thinking-step {
+  animation: thinking-step-in 240ms ease-out both;
+}
+
+.message-bubble-in {
+  animation: message-bubble-in 260ms ease-out both;
+}
+
+@keyframes message-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes thinking-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes typing-pulse {
   0%,
   100% {

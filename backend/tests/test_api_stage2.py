@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
 
 from backend.app import db
@@ -14,7 +16,7 @@ def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
     monkeypatch.setattr(db, "get_health_history", lambda *args: "Recent headache")
     monkeypatch.setattr(db, "get_medications", lambda *args: [{"drug_name": "Metformin"}])
 
-    async def run(message, profile_id, health_history, current_medications):
+    async def run(message, profile_id, health_history, current_medications, **kwargs):
         calls["context"] = (health_history, current_medications)
         return ChatResponse(
             message="Track symptoms.",
@@ -83,6 +85,83 @@ def test_general_conversation_does_not_load_health_history(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["intents"] == []
     assert "हिंदी" in response.json()["message"]
+
+
+def test_intent_extraction_endpoint_maps_romanized_hindi() -> None:
+    response = client.post(
+        "/api/intents/extract",
+        json={"message": "Mere sir me dard ho raha hai"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["primary_intent"] == "symptom_analysis"
+    assert response.json()["intents"] == ["symptom_analysis"]
+    assert response.json()["detected_language"] == "hinglish"
+
+
+def test_speech_endpoint_streams_mp3_audio(monkeypatch) -> None:
+    async def speech(*args, **kwargs):
+        return BytesIO(b"ID3demo")
+
+    monkeypatch.setattr(api, "generate_speech", speech)
+    response = client.post(
+        "/text-to-speech",
+        json={"text": "नमस्ते", "lang": "hi"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.content == b"ID3demo"
+
+
+def test_greeting_endpoint_returns_proactive_message(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(db, "get_unresolved_events", lambda *args, **kwargs: [])
+
+    async def greeting(*args, **kwargs):
+        calls["preferred_language"] = kwargs["preferred_language"]
+        return "Good morning, Ramesh. How has your blood pressure been this week?"
+
+    monkeypatch.setattr(api, "generate_proactive_greeting", greeting)
+    response = client.get(
+        "/greeting/user-1?family_member_id=family-1&preferred_language=hi"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["greeting"].startswith("Good morning")
+    assert calls["preferred_language"] == "hi"
+
+
+def test_daily_digest_endpoint_returns_cards(monkeypatch) -> None:
+    async def digest(*args, **kwargs):
+        return [{"type": "medication_reminder", "icon_emoji": "pill", "text": "Take Metformin."}]
+
+    monkeypatch.setattr(api, "generate_daily_digest", digest)
+    response = client.get("/daily-digest/user-1?preferred_language=en")
+
+    assert response.status_code == 200
+    assert response.json()[0]["type"] == "medication_reminder"
+
+
+def test_follow_up_response_marks_original_event_resolved(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(db, "mark_event_resolved", lambda event_id: calls.setdefault("resolved", event_id))
+    monkeypatch.setattr(db, "save_health_event", lambda **kwargs: calls.setdefault("saved", kwargs))
+
+    response = client.post(
+        "/chat",
+        json={
+            "message": "I am better now",
+            "profile_id": "user-1",
+            "previous_assistant_message": "How is your headache now?",
+            "follow_up_event_id": "event-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["follow_up_outcome"] == "resolved"
+    assert calls["resolved"] == "event-1"
+    assert calls["saved"]["event_type"] == "follow_up"
 
 
 def test_upload_report_stores_file_and_report_row(monkeypatch) -> None:

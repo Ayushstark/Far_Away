@@ -24,6 +24,9 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
     profile_id: str = Field(default="9000001", max_length=100)
     family_member_id: str | None = Field(default=None, max_length=100)
+    preferred_language: Literal["en", "hi"] = "en"
+    previous_assistant_message: str | None = Field(default=None, max_length=10_000)
+    follow_up_event_id: str | None = Field(default=None, max_length=100)
 
 
 class AgentResult(BaseModel):
@@ -44,7 +47,10 @@ class ChatResponse(BaseModel):
     message: str
     intents: list[IntentName] = Field(default_factory=list)
     agents_used: list[AgentName]
+    steps_taken: list[str] = Field(default_factory=list)
     results: list[AgentResult]
+    severity: Literal["high", "moderate", "none"] = "none"
+    follow_up_outcome: Literal["resolved", "ongoing"] | None = None
     emergency: bool = False
     emergency_details: EmergencyAssessment | None = None
     disclaimer: str = (
@@ -70,6 +76,22 @@ class CareBriefResponse(BaseModel):
     brief: str
 
 
+class GreetingResponse(BaseModel):
+    greeting: str
+    follow_up_event_id: str | None = None
+
+
+class InsightCard(BaseModel):
+    type: Literal[
+        "medication_reminder",
+        "trend_positive",
+        "followup_question",
+        "report_alert",
+    ]
+    icon_emoji: str
+    text: str
+
+
 class ReportResponse(BaseModel):
     profile_id: str
     filename: str
@@ -93,6 +115,20 @@ class IntentClassificationRequest(BaseModel):
 
 class IntentClassificationResponse(BaseModel):
     intents: list[IntentName]
+
+
+class IntentExtractionResponse(BaseModel):
+    primary_intent: str
+    intents: list[IntentName]
+    normalized_query: str
+    detected_language: Literal["en", "hi", "hinglish"]
+    confidence: float
+    needs_clarification: bool
+
+
+class TextToSpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5_000)
+    lang: Literal["en", "hi"] = "en"
 
 
 class FamilyMemberCreate(BaseModel):

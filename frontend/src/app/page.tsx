@@ -3,6 +3,8 @@
 import axios from "axios";
 import {
   AlertTriangle,
+  Bell,
+  BellRing,
   ChevronDown,
   ChevronUp,
   Download,
@@ -23,13 +25,33 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { DragEvent, FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const OWNER_ID = "9000001";
 
 type Tab = "chat" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
+type PreferredLanguage = "en" | "hi";
+
+const LANGUAGE_EVENT = "careos-language-change";
+
+function subscribeLanguage(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(LANGUAGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(LANGUAGE_EVENT, onChange);
+  };
+}
+
+function getLanguageSnapshot(): PreferredLanguage {
+  return window.localStorage.getItem("careos-language") === "hi" ? "hi" : "en";
+}
+
+function getServerLanguageSnapshot(): PreferredLanguage {
+  return "en";
+}
 
 type EmergencyDetails = {
   suspected: string;
@@ -40,6 +62,7 @@ type EmergencyDetails = {
 type ChatReply = {
   message: string;
   agents_used: string[];
+  steps_taken: string[];
   emergency: boolean;
   emergency_details: EmergencyDetails | null;
 };
@@ -49,6 +72,12 @@ type ChatMessage = {
   speaker: Speaker;
   text: string;
   agents?: string[];
+};
+
+type InsightCard = {
+  type: "medication_reminder" | "trend_positive" | "followup_question" | "report_alert";
+  icon_emoji: string;
+  text: string;
 };
 
 type Profile = {
@@ -90,8 +119,22 @@ type SpeechRecognitionInstance = {
   stop: () => void;
   onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
 };
+
+function responseLanguage(text: string, preferredLanguage: PreferredLanguage): PreferredLanguage {
+  return preferredLanguage === "hi" || /[\u0900-\u097f]/.test(text) ? "hi" : "en";
+}
+
+async function createCareOSAudio(text: string, preferredLanguage: PreferredLanguage) {
+  const { data } = await axios.post(
+    `${API_URL}/text-to-speech`,
+    { text, lang: responseLanguage(text, preferredLanguage) },
+    { responseType: "blob" },
+  );
+  const url = URL.createObjectURL(data);
+  return { audio: new Audio(url), url };
+}
 
 const navigation = [
   { id: "chat" as const, label: "Chat", icon: MessageCircle },
@@ -112,22 +155,27 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("chat");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [greetingLoading, setGreetingLoading] = useState(true);
+  const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  const [insightCards, setInsightCards] = useState<InsightCard[]>([]);
+  const [digestLoading, setDigestLoading] = useState(true);
   const [listening, setListening] = useState(false);
+  const preferredLanguage = useSyncExternalStore(
+    subscribeLanguage,
+    getLanguageSnapshot,
+    getServerLanguageSnapshot,
+  );
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [emergency, setEmergency] = useState<EmergencyDetails | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [ownerProfile, setOwnerProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [family, setFamily] = useState<Profile[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      speaker: "assistant",
-      text: "Hi, I am CareOS. Tell me what is happening, and I will bring in the right care agent.",
-      agents: ["emergency_detector"],
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const greetingLanguageRef = useRef<PreferredLanguage | null>(null);
+  const greetingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const followUpEventIdRef = useRef<string | null>(null);
   const conversationEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,12 +196,79 @@ export default function Home() {
       .finally(() => setProfilesLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (greetingLanguageRef.current === preferredLanguage) return;
+    greetingLanguageRef.current = preferredLanguage;
+    setGreetingLoading(true);
+
+    axios.get<{ greeting: string; follow_up_event_id: string | null }>(`${API_URL}/greeting/${OWNER_ID}`, {
+      params: { preferred_language: preferredLanguage },
+    })
+      .then(async ({ data }) => {
+        followUpEventIdRef.current = data.follow_up_event_id;
+        setMessages((current) => {
+          const nextGreeting = {
+            id: "proactive-greeting",
+            speaker: "assistant" as const,
+            text: data.greeting,
+            agents: ["care_coordinator"],
+          };
+          const withoutGreeting = current.filter((message) =>
+            !["proactive-greeting", "welcome-fallback"].includes(message.id)
+          );
+          return [nextGreeting, ...withoutGreeting];
+        });
+
+        // Browsers may require a prior tap for autoplay; manual speaker playback remains available.
+        const { audio, url } = await createCareOSAudio(data.greeting, preferredLanguage);
+        greetingAudioRef.current = audio;
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onerror = () => URL.revokeObjectURL(url);
+        try {
+          await audio.play();
+        } catch {
+          // Autoplay may be blocked until the first user interaction.
+        }
+      })
+      .catch(() => {
+        setMessages((current) => [{
+          id: "welcome-fallback",
+          speaker: "assistant",
+          text: preferredLanguage === "hi"
+            ? "नमस्ते, मैं CareOS हूँ। पिछली बातचीत के बाद से आपकी तबीयत कैसी रही है?"
+            : "Hi, I am CareOS. How have you been feeling since your last check-in?",
+          agents: ["care_coordinator"],
+        }, ...current.filter((message) => !["proactive-greeting", "welcome-fallback"].includes(message.id))]);
+      })
+      .finally(() => setGreetingLoading(false));
+
+    return () => greetingAudioRef.current?.pause();
+  }, [preferredLanguage]);
+
+  useEffect(() => {
+    axios.get<InsightCard[]>(`${API_URL}/daily-digest/${OWNER_ID}`, {
+      params: { preferred_language: preferredLanguage },
+    })
+      .then(({ data }) => setInsightCards(data))
+      .catch(() => setInsightCards([]))
+      .finally(() => setDigestLoading(false));
+  }, [preferredLanguage]);
+
   const activeProfileId = String(activeProfile.id);
   const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
+
+  function setPreferredLanguage(language: PreferredLanguage) {
+    window.localStorage.setItem("careos-language", language);
+    window.dispatchEvent(new Event(LANGUAGE_EVENT));
+  }
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
+    await sendPrompt(text);
+  }
+
+  async function sendPrompt(text: string) {
     if (!text || loading) return;
 
     setInput("");
@@ -168,7 +283,22 @@ export default function Home() {
         message: text,
         profile_id: OWNER_ID,
         family_member_id: familyMemberId,
+        preferred_language: preferredLanguage,
+        previous_assistant_message: [...messages].reverse().find((message) => message.speaker === "assistant")?.text,
+        follow_up_event_id: followUpEventIdRef.current,
       });
+      if (data.message.toLowerCase().includes("mark this symptom as resolved") || data.message.includes("ठीक हुआ दर्ज")) {
+        followUpEventIdRef.current = null;
+      }
+      if (data.steps_taken.length > 1) {
+        setLoading(false);
+        for (const step of data.steps_taken) {
+          setThinkingSteps((current) => [...current, step]);
+          await new Promise((resolve) => window.setTimeout(resolve, 700));
+        }
+        setThinkingSteps((current) => [...current, "Done"]);
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
       setMessages((current) => [
         ...current,
         {
@@ -178,6 +308,7 @@ export default function Home() {
           agents: data.agents_used,
         },
       ]);
+      setThinkingSteps([]);
       if (data.emergency) {
         setEmergency(
           data.emergency_details ?? {
@@ -188,6 +319,7 @@ export default function Home() {
         );
       }
     } catch (error) {
+      setThinkingSteps([]);
       const detail = axios.isAxiosError(error) && error.response?.data?.detail;
       setMessages((current) => [
         ...current,
@@ -204,7 +336,14 @@ export default function Home() {
     }
   }
 
-  function toggleVoiceInput() {
+  function addSystemMessage(text: string) {
+    setMessages((current) => [
+      ...current,
+      { id: crypto.randomUUID(), speaker: "system", text },
+    ]);
+  }
+
+  async function toggleVoiceInput() {
     if (listening) {
       recognitionRef.current?.stop();
       setListening(false);
@@ -223,27 +362,46 @@ export default function Home() {
     ).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          speaker: "system",
-          text: "Voice input is not supported in this browser.",
-        },
-      ]);
+      addSystemMessage("Voice input is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      addSystemMessage("This browser cannot access a microphone. Check browser permissions or try Chrome or Edge.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch {
+      addSystemMessage("Microphone access is blocked. Allow microphone permission for this site, then tap the microphone again.");
       return;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = "en-IN";
+    recognition.lang = preferredLanguage === "hi" ? "hi-IN" : "en-IN";
     recognition.onresult = (event) => setInput(event.results[0][0].transcript);
     recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onerror = (event) => {
+      setListening(false);
+      const errors: Record<string, string> = {
+        "not-allowed": "Microphone access was denied. Allow it in the browser's site permissions and try again.",
+        "audio-capture": "CareOS could not find an available microphone.",
+        "no-speech": "No speech was detected. Tap the microphone and try speaking again.",
+        network: "Voice recognition could not reach the browser speech service. Check your connection.",
+      };
+      addSystemMessage(errors[event.error] ?? "Voice input stopped unexpectedly. Please try again.");
+    };
     recognitionRef.current = recognition;
-    recognition.start();
-    setListening(true);
+    try {
+      recognition.start();
+      setListening(true);
+    } catch {
+      addSystemMessage("Voice input could not start. Please wait a moment and try again.");
+    }
   }
 
   return (
@@ -260,12 +418,19 @@ export default function Home() {
             <ChatScreen
               input={input}
               loading={loading}
+              greetingLoading={greetingLoading}
+              thinkingSteps={thinkingSteps}
+              insightCards={insightCards}
+              digestLoading={digestLoading}
               listening={listening}
+              preferredLanguage={preferredLanguage}
               messages={messages}
               conversationEnd={conversationEnd}
               onInput={setInput}
               onSend={sendMessage}
               onVoice={toggleVoiceInput}
+              onLanguage={setPreferredLanguage}
+              onInsight={sendPrompt}
             />
           ) : tab === "reports" ? (
             <ReportsScreen familyMemberId={familyMemberId} />
@@ -293,6 +458,48 @@ export default function Home() {
   );
 }
 
+function DailyDigest({
+  cards,
+  loading,
+  preferredLanguage,
+  onSelect,
+}: {
+  cards: InsightCard[];
+  loading: boolean;
+  preferredLanguage: PreferredLanguage;
+  onSelect: (text: string) => void;
+}) {
+  const styles: Record<InsightCard["type"], string> = {
+    medication_reminder: "border-[#b9d5e7] bg-[#eef7fc]",
+    trend_positive: "border-[#bcdcc9] bg-[#eef8f2]",
+    followup_question: "border-[#ead39a] bg-[#fff8e7]",
+    report_alert: "border-[#efc0b8] bg-[#fff2ef]",
+  };
+  if (loading) {
+    return <div className="h-20 animate-pulse rounded-md bg-[#eef3f0]" aria-label="Loading daily insights" />;
+  }
+  return (
+    <section aria-label={preferredLanguage === "hi" ? "आज की स्वास्थ्य जानकारी" : "Today's health insights"}>
+      <p className="mb-2 text-xs font-semibold uppercase text-[#60736a]">
+        {preferredLanguage === "hi" ? "आज की जानकारी" : "Today"}
+      </p>
+      <div className="flex snap-x gap-2 overflow-x-auto pb-2">
+        {cards.map((card, index) => (
+          <button
+            key={`${card.type}-${index}`}
+            type="button"
+            onClick={() => onSelect(card.text)}
+            className={`min-w-56 snap-start rounded-md border p-3 text-left text-sm leading-5 transition hover:-translate-y-0.5 ${styles[card.type]}`}
+          >
+            <span className="mb-2 block text-lg" aria-hidden="true">{card.icon_emoji}</span>
+            {card.text}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Header({ tab, activeProfile }: { tab: Tab; activeProfile: Profile }) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#f1f5f3] px-4 sm:px-6">
@@ -317,75 +524,117 @@ function Header({ tab, activeProfile }: { tab: Tab; activeProfile: Profile }) {
 function ChatScreen({
   input,
   loading,
+  greetingLoading,
+  thinkingSteps,
+  insightCards,
+  digestLoading,
   listening,
+  preferredLanguage,
   messages,
   conversationEnd,
   onInput,
   onSend,
   onVoice,
+  onLanguage,
+  onInsight,
 }: {
   input: string;
   loading: boolean;
+  greetingLoading: boolean;
+  thinkingSteps: string[];
+  insightCards: InsightCard[];
+  digestLoading: boolean;
   listening: boolean;
+  preferredLanguage: PreferredLanguage;
   messages: ChatMessage[];
   conversationEnd: React.RefObject<HTMLDivElement | null>;
   onInput: (value: string) => void;
   onSend: (event: FormEvent) => void;
   onVoice: () => void;
+  onLanguage: (language: PreferredLanguage) => void;
+  onInsight: (text: string) => void;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           <div className="mb-2">
-            <h1 className="text-2xl font-bold tracking-tight">How are you feeling today?</h1>
-            <p className="mt-1 text-sm text-[#687971]">Describe your symptoms or ask about your health history.</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h1 className="text-xl font-semibold">{preferredLanguage === "hi" ? "आज आप कैसा महसूस कर रहे हैं?" : "How are you feeling today?"}</h1>
+                <p className="mt-1 text-sm text-[#687971]">
+                  {preferredLanguage === "hi" ? "CareOS हर संदेश में पहले आपात संकेतों की जाँच करता है।" : "CareOS checks every message for urgent warning signs first."}
+                </p>
+              </div>
+              <div className="flex h-9 rounded-md border border-[#cfdad5] p-0.5" aria-label="Conversation language">
+                {(["en", "hi"] as PreferredLanguage[]).map((language) => (
+                  <button
+                    key={language}
+                    type="button"
+                    onClick={() => onLanguage(language)}
+                    className={`min-w-14 rounded px-3 text-xs font-semibold ${preferredLanguage === language ? "bg-[#12664f] text-white" : "text-[#5e7168]"}`}
+                  >
+                    {language === "en" ? "English" : "हिंदी"}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
+          {(digestLoading || insightCards.length > 0) && (
+            <DailyDigest
+              cards={insightCards}
+              loading={digestLoading}
+              preferredLanguage={preferredLanguage}
+              onSelect={onInsight}
+            />
+          )}
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble key={message.id} message={message} preferredLanguage={preferredLanguage} />
           ))}
-          {loading && <TypingIndicator />}
-          <div ref={conversationEnd} className="h-4" />
+          {!!thinkingSteps.length && (
+            <ThinkingTrail steps={thinkingSteps} preferredLanguage={preferredLanguage} />
+          )}
+          {(loading || greetingLoading) && <TypingIndicator />}
+          <div ref={conversationEnd} />
         </div>
       </div>
 
       <div className="shrink-0 bg-white px-4 pb-6 pt-2 sm:px-8">
-        <form
-          onSubmit={onSend}
-          className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-[#dfe8e4] bg-[#fcfdfe] p-2 transition-all focus-within:border-[#12664f] focus-within:ring-4 focus-within:ring-[#12664f]/5 shadow-sm"
-        >
-           <button
-              type="button"
-              onClick={onVoice}
-              aria-label={listening ? "Stop voice" : "Voice input"}
-              className={`grid size-10 shrink-0 place-items-center rounded-xl transition ${
-                listening
-                  ? "bg-red-50 text-red-600 animate-pulse"
-                  : "text-[#566a60] hover:bg-gray-100"
-              }`}
-            >
-              {listening ? <MicOff size={20} /> : <Mic size={20} />}
-            </button>
-            <textarea
-              value={input}
-              onChange={(event) => onInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              rows={1}
-              placeholder={listening ? "Listening..." : "Type your message..."}
-              className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm outline-none placeholder:text-gray-400"
-            />
-            <button
-              disabled={!input.trim() || loading}
-              aria-label="Send"
-              className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#12664f] text-white transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <Send size={18} />
-            </button>
+        <form onSubmit={onSend} className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-[#dfe8e4] bg-[#fcfdfe] p-2 shadow-sm transition-all focus-within:border-[#12664f] focus-within:ring-4 focus-within:ring-[#12664f]/5">
+          <button
+            type="button"
+            onClick={onVoice}
+            aria-label={listening ? "Stop voice input" : "Start voice input"}
+            title={listening ? "Stop voice input" : "Start voice input"}
+            className={`grid size-10 shrink-0 place-items-center rounded-xl transition ${
+              listening
+                ? "animate-pulse bg-red-50 text-red-600"
+                : "text-[#566a60] hover:bg-gray-100"
+            }`}
+          >
+            {listening ? <MicOff size={19} /> : <Mic size={19} />}
+          </button>
+          <textarea
+            value={input}
+            onChange={(event) => onInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            rows={1}
+            placeholder={listening ? (preferredLanguage === "hi" ? "सुन रहा हूँ..." : "Listening...") : (preferredLanguage === "hi" ? "लक्षण बताएँ या स्वास्थ्य प्रश्न पूछें" : "Describe symptoms or ask a health question")}
+            className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm outline-none placeholder:text-gray-400"
+          />
+          <button
+            disabled={!input.trim() || loading}
+            aria-label="Send message"
+            title="Send message"
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#12664f] text-white transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <Send size={18} />
+          </button>
         </form>
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-[#809087]">
           CareOS provides general health information, not a diagnosis.
@@ -395,61 +644,76 @@ function ChatScreen({
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({ message, preferredLanguage }: { message: ChatMessage; preferredLanguage: PreferredLanguage }) {
   const isUser = message.speaker === "user";
   const isSystem = message.speaker === "system";
+  const [generatingVoice, setGeneratingVoice] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    return () => window.speechSynthesis?.cancel();
+    return () => {
+      audioRef.current?.pause();
+    };
   }, []);
 
-  function toggleSpeech() {
-    if (!("speechSynthesis" in window)) return;
+  async function toggleSpeech() {
     if (speaking) {
-      window.speechSynthesis.cancel();
+      audioRef.current?.pause();
       setSpeaking(false);
       return;
     }
 
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(message.text);
-    const isHindi = /[\u0900-\u097f]/.test(message.text);
-    const language = isHindi ? "hi-IN" : "en-US";
-    const voices = window.speechSynthesis.getVoices();
-    utterance.lang = language;
-    utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === language.toLowerCase())
-      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(isHindi ? "hi" : "en"))
-      ?? null;
-    utterance.rate = 0.95;
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    setSpeaking(true);
-    window.speechSynthesis.speak(utterance);
+    audioRef.current?.pause();
+    setVoiceError("");
+    setGeneratingVoice(true);
+    try {
+      const { audio, url } = await createCareOSAudio(message.text, preferredLanguage);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setSpeaking(false);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setSpeaking(false);
+        setVoiceError("CareOS could not play this voice response.");
+      };
+      setGeneratingVoice(false);
+      setSpeaking(true);
+      await audio.play();
+    } catch (error) {
+      setGeneratingVoice(false);
+      setSpeaking(false);
+      const detail = axios.isAxiosError(error) && error.response?.data?.detail;
+      setVoiceError(typeof detail === "string" ? detail : "CareOS could not generate this voice response.");
+    }
   }
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-6 sm:max-w-[80%] ${
+        className={`message-bubble-in max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-6 sm:max-w-[80%] ${
           isUser
-            ? "bg-[#12664f] text-white rounded-tr-none"
+            ? "rounded-tr-none bg-[#12664f] text-white"
             : isSystem
               ? "border border-amber-100 bg-amber-50 text-amber-900"
-              : "bg-[#f1f5f3] text-[#24322c] rounded-tl-none"
+              : "rounded-tl-none bg-[#f1f5f3] text-[#24322c]"
         }`}
       >
-        {!isUser && !isSystem && ( 
+        {!isUser && !isSystem && (
           <div className="mb-1 flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-[#12664f]">CareOS</p>
             <button
               type="button"
               onClick={toggleSpeech}
-              aria-label={speaking ? "Stop voice output" : "Read response aloud"}
-              title={speaking ? "Stop voice output" : "Read response aloud"}
+              disabled={generatingVoice}
+              aria-label={generatingVoice ? "Generating voice output" : speaking ? "Stop voice output" : "Read response aloud"}
+              title={generatingVoice ? "Generating voice output" : speaking ? "Stop voice output" : "Read response aloud"}
               className="grid size-7 shrink-0 place-items-center rounded-lg text-[#597269] hover:bg-white/50"
             >
-              {speaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              {generatingVoice ? <LoaderCircle className="animate-spin" size={16} /> : speaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
           </div>
         )}
@@ -459,6 +723,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             {message.agents.map((agent) => agent.replaceAll("_", " ")).join(" + ")}
           </p>
         )}
+        {voiceError && <p className="mt-2 text-[11px] text-[#9b3a28]">{voiceError}</p>}
       </div>
     </div>
   );
@@ -476,6 +741,34 @@ function TypingIndicator() {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+function ThinkingTrail({
+  steps,
+  preferredLanguage,
+}: {
+  steps: string[];
+  preferredLanguage: PreferredLanguage;
+}) {
+  const labels: Record<string, { icon: React.ReactNode; hi: string }> = {
+    "Analyzing symptoms": { icon: <HeartPulse size={15} />, hi: "लक्षणों का विश्लेषण कर रहा हूँ" },
+    "Checking your medications": { icon: <Pill size={15} />, hi: "आपकी दवाओं की जाँच कर रहा हूँ" },
+    "Finding the right specialist": { icon: <UserRound size={15} />, hi: "सही विशेषज्ञ ढूँढ रहा हूँ" },
+    Done: { icon: <HeartPulse size={15} />, hi: "पूरा हुआ" },
+  };
+  return (
+    <div className="flex flex-col gap-1.5 px-1 text-xs text-[#5f756a]" aria-label="CareOS agent activity">
+      {steps.map((step, index) => {
+        const detail = labels[step] ?? { icon: <LoaderCircle size={15} />, hi: step };
+        return (
+          <div key={`${step}-${index}`} className="thinking-step flex items-center gap-2">
+            <span className="text-[#12664f]">{detail.icon}</span>
+            <span>{preferredLanguage === "hi" ? detail.hi : step}{step === "Done" ? "" : "..."}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -559,6 +852,10 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
       setError("Please select a PDF report.");
       return;
     }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Please select a PDF smaller than 10 MB.");
+      return;
+    }
     setBusy(true);
     setError("");
     const form = new FormData();
@@ -569,8 +866,9 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
     try {
       await axios.post(`${API_URL}/upload-report`, form);
       await loadReports();
-    } catch {
-      setError("CareOS could not upload or analyze this report.");
+    } catch (error) {
+      const detail = axios.isAxiosError(error) && error.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "CareOS could not upload or analyze this report.");
     } finally {
       setBusy(false);
     }
@@ -627,6 +925,28 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const [initialLoading, setInitialLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [remindersEnabled, setRemindersEnabled] = useState(() =>
+    typeof window !== "undefined"
+    && window.localStorage.getItem("careos-medication-reminders") === "true"
+    && "Notification" in window
+    && Notification.permission === "granted",
+  );
+
+  useEffect(() => {
+    if (!remindersEnabled || !("Notification" in window)) return;
+    const timers = medications.flatMap((medication) =>
+      (medication.timing ?? []).map((timing) => {
+        const doseTime = nextDoseTime(timing);
+        if (!doseTime) return undefined;
+        return window.setTimeout(() => {
+          new Notification(`Time for ${medication.drug_name}`, {
+            body: `${medication.dose} | ${timing}${medication.with_food ? " | Take with food" : ""}`,
+          });
+        }, doseTime.getTime() - Date.now());
+      }).filter((timer): timer is number => timer !== undefined),
+    );
+    return () => timers.forEach(window.clearTimeout);
+  }, [medications, remindersEnabled]);
 
   useEffect(() => {
     axios
@@ -690,8 +1010,37 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
     }
   }
 
+  async function enableReminders() {
+    if (!("Notification" in window)) {
+      setError("Browser notifications are not supported here.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    const enabled = permission === "granted";
+    setRemindersEnabled(enabled);
+    window.localStorage.setItem("careos-medication-reminders", String(enabled));
+    if (enabled) {
+      setError("");
+      new Notification("CareOS medication reminders enabled", {
+        body: "You will receive alerts for upcoming active-medication doses while CareOS is open.",
+      });
+    } else {
+      setError("Notification permission was not granted.");
+    }
+  }
+
   return (
     <ScreenShell title="Active medications" description="Track doses, timing, and possible interactions.">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#dfe8e4] bg-[#f4f8f6] p-4">
+        <div>
+          <p className="text-sm font-semibold">Medication reminders</p>
+          <p className="mt-1 text-xs text-[#687971]">{remindersEnabled ? "Browser reminders are active while CareOS is open." : "Enable alerts for upcoming active-medication doses."}</p>
+        </div>
+        <button type="button" onClick={enableReminders} className="flex h-10 items-center gap-2 rounded-md border border-[#12664f] px-4 text-sm font-semibold text-[#12664f]">
+          {remindersEnabled ? <BellRing size={17} /> : <Bell size={17} />}
+          {remindersEnabled ? "Reminders active" : "Enable reminders"}
+        </button>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {medications.map((medication) => (
           <article key={medication.id} className="rounded-md border border-[#dfe8e4] p-4">
@@ -699,6 +1048,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
             <p className="mt-3 text-sm font-semibold">{medication.drug_name}</p>
             <p className="mt-1 text-xs text-[#687971]">{medication.dose} | {medication.frequency}</p>
             <p className="mt-2 text-xs text-[#687971]">{medication.timing?.join(", ") || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
+            <p className="mt-3 border-t border-[#e5ece8] pt-3 text-xs font-medium text-[#12664f]">{nextDoseLabel(medication.timing)}</p>
           </article>
         ))}
       </div>
@@ -862,12 +1212,44 @@ function formatList(value?: string | string[]) {
   return Array.isArray(value) ? value.join(", ") : value;
 }
 
+function nextDoseTime(timing: string) {
+  const match = timing.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  const period = match[3]?.toLowerCase();
+  if (period === "pm" && hour < 12) hour += 12;
+  if (period === "am" && hour === 12) hour = 0;
+  const next = new Date();
+  next.setHours(hour, minute, 0, 0);
+  const weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const requestedDay = weekdays.findIndex((day) => timing.toLowerCase().includes(day));
+  if (requestedDay >= 0) {
+    let daysAhead = (requestedDay - next.getDay() + 7) % 7;
+    if (daysAhead === 0 && next.getTime() <= Date.now()) daysAhead = 7;
+    next.setDate(next.getDate() + daysAhead);
+  } else if (next.getTime() <= Date.now()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+}
+
+function nextDoseLabel(timings?: string[]) {
+  const next = (timings ?? [])
+    .map((timing) => ({ timing, date: nextDoseTime(timing) }))
+    .filter((item): item is { timing: string; date: Date } => Boolean(item.date))
+    .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
+  return next
+    ? `Next dose: ${next.date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`
+    : "Add a clock time to enable dose reminders.";
+}
+
 function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
     <aside className="hidden h-full w-64 shrink-0 overflow-y-auto border-r border-[#f1f5f3] bg-white p-6 md:block">
       <div className="mb-8 flex items-center gap-2 px-2 font-bold text-[#12664f]">
-         <HeartPulse size={22} />
-         <span className="text-lg">CareOS</span>
+        <HeartPulse size={22} />
+        <span className="text-lg">CareOS</span>
       </div>
       <nav className="space-y-1.5">
         {navigation.map(({ id, label, icon: Icon }) => (
@@ -875,7 +1257,8 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
             key={id}
             onClick={() => onChange(id)}
             className={`flex h-11 w-full items-center gap-3 rounded-xl px-4 text-sm font-medium transition-all ${
-              active === id ? "bg-[#f1f8f5] text-[#12664f]" : "text-[#596b62] hover:bg-gray-50"}`}
+              active === id ? "bg-[#f1f8f5] text-[#12664f]" : "text-[#596b62] hover:bg-gray-50"
+            }`}
           >
             <Icon size={18} />
             {label}

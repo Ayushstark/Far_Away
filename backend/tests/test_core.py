@@ -6,7 +6,12 @@ from backend.app.main import app
 from backend.app import db
 from backend.app.services import llm
 from backend.app.services.orchestrator import Orchestrator, is_casual_message
-from backend.app.services.input_understanding import understand_input
+from backend.app.services.input_understanding import (
+    IntentExtraction,
+    extract_intent,
+    understand_input,
+)
+from backend.app.schemas import EmergencyAssessment
 from backend.app.services.intent_classifier import classify_intent_fallback
 from agents import emergency
 from memory.store import HealthMemory
@@ -175,3 +180,85 @@ def test_input_understanding_blocks_random_clinical_routing() -> None:
     assert understand_input("My stomach hurts").kind == "healthcare"
     assert classify_intent_fallback("My stomach hurts") == ["symptom_analysis"]
     assert classify_intent_fallback("Can we talk in Hindi?") == []
+
+
+def test_structured_intent_extraction_understands_romanized_hindi() -> None:
+    casual = asyncio.run(extract_intent("Aap kaise ho?"))
+    symptom = asyncio.run(extract_intent("Mere sir me dard ho raha hai"))
+
+    assert casual.primary_intent == "casual"
+    assert casual.intents == ()
+    assert symptom.primary_intent == "symptom_analysis"
+    assert symptom.intents == ("symptom_analysis",)
+    assert symptom.detected_language == "hinglish"
+    assert symptom.confidence >= 0.9
+
+
+def test_recurring_moderate_symptom_runs_autonomous_agent_chain(monkeypatch) -> None:
+    orchestrator = Orchestrator(memory=HealthMemory(persistent=False))
+
+    async def symptoms(*args, **kwargs):
+        return "Symptom analysis"
+
+    async def medication(action, data, user_id):
+        assert action == "side_effects"
+        return "Medication review"
+
+    async def specialist(*args, **kwargs):
+        return "Specialist advice"
+
+    async def merge(results, preferred_language):
+        assert preferred_language == "hi"
+        return "संयुक्त उत्तर"
+
+    monkeypatch.setattr("backend.app.services.orchestrator.analyze_symptoms", symptoms)
+    monkeypatch.setattr(orchestrator.medication_manager, "run", medication)
+    monkeypatch.setattr("backend.app.services.orchestrator.specialist_advice", specialist)
+    monkeypatch.setattr("backend.app.services.orchestrator.merge_responses", merge)
+
+    response = asyncio.run(
+        orchestrator.run(
+            "Mere sir me dard phir ho raha hai, it is getting worse",
+            "user-1",
+            health_history="Previous headache",
+            current_medications=[{"drug_name": "Amlodipine"}],
+            preferred_language="hi",
+            extraction=IntentExtraction(
+                "symptom_analysis",
+                intents=("symptom_analysis",),
+                normalized_query="Recurring worsening headache",
+                detected_language="hinglish",
+                confidence=1.0,
+            ),
+            emergency_assessment=EmergencyAssessment(),
+        )
+    )
+
+    assert response.severity == "moderate"
+    assert response.agents_used == [
+        "emergency_detector",
+        "symptom_analyst",
+        "medication_manager",
+        "care_coordinator",
+    ]
+    assert response.steps_taken == [
+        "Analyzing symptoms",
+        "Checking your medications",
+        "Finding the right specialist",
+    ]
+    assert response.message == "संयुक्त उत्तर"
+
+
+def test_follow_up_outcome_is_detected_before_general_intent_routing() -> None:
+    response = asyncio.run(
+        Orchestrator(memory=HealthMemory(persistent=False)).run(
+            "Better now",
+            "user-1",
+            previous_assistant_message="How is your headache now?",
+            follow_up_event_id="event-1",
+            emergency_assessment=EmergencyAssessment(),
+        )
+    )
+
+    assert response.follow_up_outcome == "resolved"
+    assert response.steps_taken == ["Updating your health timeline"]

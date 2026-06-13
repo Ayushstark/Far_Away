@@ -1,12 +1,13 @@
-from agents.care_coordinator import create_care_brief
+import re
+
+from agents.care_coordinator import create_care_brief, specialist_advice
 from agents.emergency import assess_emergency, emergency_response
 from agents.medication import MedicationManager
 from agents.symptom import analyze_symptoms
-from backend.app.schemas import AgentResult, ChatResponse, IntentName
-from backend.app.services.intent_classifier import classify_intent
+from backend.app.schemas import AgentResult, ChatResponse, EmergencyAssessment, IntentName
 from backend.app.services.emergency_notifier import EmergencyNotifier
 from backend.app.services.language import wants_hindi
-from backend.app.services.input_understanding import understand_input
+from backend.app.services.input_understanding import IntentExtraction, extract_intent
 from backend.app.services.response_merger import merge_responses
 from memory.store import HealthMemory
 
@@ -30,6 +31,59 @@ CASUAL_MESSAGES = {
     "ok",
     "bye",
 }
+
+RECURRING_PATTERN = re.compile(
+    r"\b(again|every|recurring|repeated|keeps happening|keeps coming|wapas|phir|baar baar|bar bar|फिर|बार बार)\b",
+    re.IGNORECASE,
+)
+HIGH_SEVERITY_TERMS = (
+    "severe", "unbearable", "worst", "very intense", "can't walk", "cannot walk",
+    "बहुत तेज", "असहनीय",
+)
+MODERATE_SEVERITY_TERMS = (
+    "moderate", "persistent", "keeps", "again", "every day", "worse",
+    "लगातार", "बार बार", "फिर", "बढ़",
+)
+RESOLVED_FOLLOW_UP_TERMS = (
+    "better", "fine now", "gone", "resolved", "no pain", "stopped",
+    "theek", "thik", "ठीक", "बेहतर", "अब नहीं",
+)
+ONGOING_FOLLOW_UP_TERMS = (
+    "still", "same", "worse", "hurts", "pain", "not better",
+    "abhi bhi", "same hai", "अभी भी", "वैसा", "बदतर", "दर्द",
+)
+
+
+def symptom_severity(message: str) -> str:
+    lowered = message.lower()
+    if any(term in lowered for term in HIGH_SEVERITY_TERMS):
+        return "high"
+    if any(term in lowered for term in MODERATE_SEVERITY_TERMS):
+        return "moderate"
+    return "none"
+
+
+def follow_up_outcome(message: str) -> str | None:
+    lowered = message.lower()
+    if any(term in lowered for term in RESOLVED_FOLLOW_UP_TERMS):
+        return "resolved"
+    if any(term in lowered for term in ONGOING_FOLLOW_UP_TERMS):
+        return "ongoing"
+    return None
+
+
+def is_follow_up_question(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "better, worse, or about the same",
+            "how are you feeling now",
+            "how is your",
+            "बेहतर, बदतर या पहले जैसे",
+            "अब आप कैसा महसूस",
+        )
+    )
 
 
 def is_casual_message(message: str) -> bool:
@@ -62,9 +116,14 @@ class Orchestrator:
         profile_id: str,
         health_history: str | None = None,
         current_medications: list[dict] | None = None,
+        preferred_language: str = "en",
+        extraction: IntentExtraction | None = None,
+        emergency_assessment: EmergencyAssessment | None = None,
+        previous_assistant_message: str | None = None,
+        follow_up_event_id: str | None = None,
     ) -> ChatResponse:
         # Emergency screening always runs first and can short-circuit all other work.
-        emergency = await assess_emergency(message)
+        emergency = emergency_assessment or await assess_emergency(message)
         if emergency.is_emergency:
             emergency.family_notified = self.emergency_notifier.notify_family(
                 profile_id,
@@ -76,7 +135,7 @@ class Orchestrator:
                 message,
                 {"type": "emergency_message", "severity": emergency.severity},
             )
-            alert = emergency_response(emergency)
+            alert = emergency_response(emergency, preferred_language)
             return ChatResponse(
                 message=alert,
                 intents=["emergency_detection"],
@@ -84,10 +143,41 @@ class Orchestrator:
                 results=[AgentResult(agent="emergency_detector", summary=alert)],
                 emergency=True,
                 emergency_details=emergency,
+                severity="high",
             )
 
-        understanding = understand_input(message)
-        if understanding.kind == "language_request":
+        outcome = (
+            follow_up_outcome(message)
+            if follow_up_event_id
+            and previous_assistant_message
+            and is_follow_up_question(previous_assistant_message)
+            else None
+        )
+        if outcome:
+            if outcome == "resolved":
+                reply = (
+                    "यह सुनकर अच्छा लगा कि अब आप बेहतर हैं। मैं इस लक्षण को ठीक हुआ दर्ज कर रहा हूँ; दोबारा होने पर CareOS या डॉक्टर को बताएँ।"
+                    if preferred_language == "hi"
+                    else "I am glad you are feeling better. I will mark this symptom as resolved; tell CareOS or your doctor if it returns."
+                )
+            else:
+                reply = (
+                    "समझ गया, लक्षण अभी भी बना हुआ है। मैं इसे जारी दर्ज कर रहा हूँ; अगर यह बढ़े या नया गंभीर लक्षण आए तो डॉक्टर से संपर्क करें।"
+                    if preferred_language == "hi"
+                    else "Understood, the symptom is still present. I will record that; contact a doctor if it worsens or a new serious symptom appears."
+                )
+            return ChatResponse(
+                message=reply,
+                intents=["symptom_analysis"],
+                agents_used=["emergency_detector", "care_coordinator"],
+                steps_taken=["Updating your health timeline"],
+                results=[AgentResult(agent="care_coordinator", summary=reply)],
+                severity="none" if outcome == "resolved" else "moderate",
+                follow_up_outcome=outcome,
+            )
+
+        understood = extraction or await extract_intent(message)
+        if understood.primary_intent == "language_request":
             return ChatResponse(
                 message="हाँ, बिल्कुल। मैं आपसे हिंदी में बात कर सकता हूँ। आप क्या जानना चाहते हैं?",
                 intents=[],
@@ -95,19 +185,22 @@ class Orchestrator:
                 results=[],
             )
 
-        if understanding.kind == "casual" or is_casual_message(message):
+        if understood.primary_intent == "casual" or is_casual_message(message):
             return ChatResponse(
-                message=casual_response(message),
+                message=casual_response(
+                    f"{message} हिंदी" if preferred_language == "hi" else message
+                ),
                 intents=[],
                 agents_used=["emergency_detector"],
                 results=[],
             )
 
-        if understanding.kind == "unclear":
+        if understood.primary_intent == "unclear" or understood.needs_clarification:
             return ChatResponse(
                 message=(
-                    "I want to make sure I understand correctly. Are you asking about "
-                    "a symptom, medicine, medical report, or doctor visit?"
+                    "मैं आपकी बात सही तरह समझना चाहता हूँ। क्या आप किसी लक्षण, दवा, मेडिकल रिपोर्ट या डॉक्टर से मिलने के बारे में पूछ रहे हैं?"
+                    if preferred_language == "hi"
+                    else "I want to make sure I understand correctly. Are you asking about a symptom, medicine, medical report, or doctor visit?"
                 ),
                 intents=[],
                 agents_used=["emergency_detector"],
@@ -115,13 +208,14 @@ class Orchestrator:
             )
 
         history = [health_history] if health_history else self.memory.recall(profile_id, message)
-        intents = await classify_intent(message)
+        intents = list(understood.intents)
         actionable = [intent for intent in intents if intent != "emergency_detection"]
         if not actionable:
             return ChatResponse(
                 message=(
-                    "Please share a little more detail about the health concern so I "
-                    "can choose the right care agent."
+                    "कृपया अपनी स्वास्थ्य संबंधी चिंता के बारे में थोड़ी और जानकारी दें, ताकि मैं सही CareOS एजेंट चुन सकूँ।"
+                    if preferred_language == "hi"
+                    else "Please share a little more detail about the health concern so I can choose the right care agent."
                 ),
                 intents=[],
                 agents_used=["emergency_detector"],
@@ -129,24 +223,73 @@ class Orchestrator:
             )
 
         results: list[AgentResult] = []
+        steps_taken: list[str] = []
+        severity = "none"
+        routed_message = (
+            f"{message}\n\nPlease reply in fluent Hindi."
+            if preferred_language == "hi" and not wants_hindi(message)
+            else message
+        )
+        routed_message += f"\n\nInterpreted user meaning: {understood.normalized_query}"
         for intent in actionable:
             result = await self._run_intent(
                 intent,
-                message,
+                routed_message,
                 profile_id,
                 history,
                 current_medications or [],
+                preferred_language,
             )
             if result:
                 results.append(result)
+                steps_taken.append(
+                    {
+                        "symptom_analysis": "Analyzing symptoms",
+                        "report_reading": "Reviewing report request",
+                        "medication_management": "Checking medications",
+                        "care_coordination": "Coordinating care",
+                    }[intent]
+                )
+
+        if "symptom_analysis" in actionable:
+            severity = symptom_severity(message)
+            if severity in {"high", "moderate"} and current_medications:
+                results.append(
+                    AgentResult(
+                        agent="medication_manager",
+                        summary=await self.medication_manager.run(
+                            "side_effects",
+                            {
+                                "symptom": routed_message,
+                                "current_medications": current_medications,
+                            },
+                            profile_id,
+                        ),
+                    )
+                )
+                steps_taken.append("Checking your medications")
+            if RECURRING_PATTERN.search(message):
+                results.append(
+                    AgentResult(
+                        agent="care_coordinator",
+                        summary=await specialist_advice(
+                            routed_message,
+                            "\n".join(history),
+                            preferred_language,
+                        ),
+                    )
+                )
+                steps_taken.append("Finding the right specialist")
 
         self.memory.remember(profile_id, message, {"type": "user_message"})
-        merged = await merge_responses(results)
+        merged = await merge_responses(results, preferred_language)
         return ChatResponse(
             message=merged,
             intents=intents,
             agents_used=["emergency_detector", *[result.agent for result in results]],
+            steps_taken=steps_taken,
             results=results,
+            severity=severity,
         )
 
     async def _run_intent(
@@ -156,6 +299,7 @@ class Orchestrator:
         profile_id: str,
         history: list[str],
         current_medications: list[dict],
+        preferred_language: str,
     ) -> AgentResult | None:
         if intent == "symptom_analysis":
             return AgentResult(
@@ -165,7 +309,11 @@ class Orchestrator:
         if intent == "report_reading":
             return AgentResult(
                 agent="report_reader",
-                summary="Please upload the PDF report using the report endpoint for a full interpretation.",
+                summary=(
+                    "पूरी व्याख्या के लिए कृपया रिपोर्ट स्क्रीन से PDF अपलोड करें।"
+                    if preferred_language == "hi"
+                    else "Please upload the PDF report using the report endpoint for a full interpretation."
+                ),
             )
         if intent == "medication_management":
             return AgentResult(
@@ -184,6 +332,7 @@ class Orchestrator:
                     self.memory,
                     health_history="\n".join(history),
                     current_medications=current_medications,
+                    preferred_language=preferred_language,
                 ),
             )
         return None

@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 google-genai
 groq
+gtts
 chromadb
 supabase
 pypdf

@@ -4,13 +4,20 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from agents.care_coordinator import brief_to_pdf, create_care_brief
+from agents.care_coordinator import (
+    brief_to_pdf,
+    create_care_brief,
+    generate_proactive_greeting,
+    generate_daily_digest,
+)
+from agents.emergency import assess_emergency
 from agents.report_reader import read_report
 from backend.app import db
 from backend.app.schemas import (
     CareBriefResponse,
     ChatRequest,
     ChatResponse,
+    GreetingResponse,
     MedicationRequest,
     MedicationResponse,
     MemorySearchRequest,
@@ -18,15 +25,18 @@ from backend.app.schemas import (
     ReportResponse,
     IntentClassificationRequest,
     IntentClassificationResponse,
+    IntentExtractionResponse,
+    TextToSpeechRequest,
     FamilyMemberCreate,
     MedicationCreate,
     HistoryResponse,
     InteractionCheckRequest,
     InteractionCheckResponse,
+    InsightCard,
 )
-from backend.app.services.intent_classifier import classify_intent
-from backend.app.services.input_understanding import understand_input
+from backend.app.services.input_understanding import extract_intent
 from backend.app.services.orchestrator import Orchestrator
+from backend.app.services.speech import generate_speech
 from backend.app.config import settings
 
 app = FastAPI(title="CareOS Healthcare API", version="0.2.0")
@@ -54,10 +64,11 @@ async def health() -> dict[str, str | bool]:
 @app.post("/api/chat", response_model=ChatResponse, include_in_schema=False)
 async def chat(request: ChatRequest) -> ChatResponse:
     try:
-        understanding = understand_input(request.message)
+        emergency = await assess_emergency(request.message)
+        extraction = await extract_intent(request.message)
         history = None
         medications = None
-        if understanding.kind == "healthcare":
+        if extraction.is_healthcare and not emergency.is_emergency:
             try:
                 history = db.get_health_history(request.profile_id, request.family_member_id)
                 medications = db.get_medications(request.profile_id, request.family_member_id)
@@ -71,20 +82,34 @@ async def chat(request: ChatRequest) -> ChatResponse:
             request.profile_id,
             health_history=history,
             current_medications=medications,
+            preferred_language=request.preferred_language,
+            extraction=extraction,
+            emergency_assessment=emergency,
+            previous_assistant_message=request.previous_assistant_message,
+            follow_up_event_id=request.follow_up_event_id,
         )
-        if understanding.kind == "healthcare" or response.emergency:
+        if response.follow_up_outcome == "resolved" and request.follow_up_event_id:
+            try:
+                db.mark_event_resolved(request.follow_up_event_id)
+            except Exception:
+                pass
+        if extraction.is_healthcare or response.emergency or response.follow_up_outcome:
             try:
                 db.save_health_event(
                     user_id=request.profile_id,
                     family_member_id=request.family_member_id,
-                    event_type=response.intents[0] if response.intents else "chat",
+                    event_type=(
+                        "follow_up"
+                        if response.follow_up_outcome
+                        else "symptom"
+                        if response.intents and response.intents[0] == "symptom_analysis"
+                        else response.intents[0]
+                        if response.intents
+                        else "chat"
+                    ),
                     description=request.message,
                     ai_response=response.message,
-                    severity=(
-                        response.emergency_details.severity
-                        if response.emergency_details
-                        else "none"
-                    ),
+                    severity=response.severity,
                     body_part=None,
                 )
             except Exception:
@@ -97,7 +122,69 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/intents/classify", response_model=IntentClassificationResponse)
 async def classify(request: IntentClassificationRequest) -> IntentClassificationResponse:
-    return IntentClassificationResponse(intents=await classify_intent(request.message))
+    extraction = await extract_intent(request.message)
+    return IntentClassificationResponse(intents=list(extraction.intents))
+
+
+@app.post("/api/intents/extract", response_model=IntentExtractionResponse)
+async def extract_user_intent(request: IntentClassificationRequest) -> IntentExtractionResponse:
+    extraction = await extract_intent(request.message)
+    return IntentExtractionResponse(
+        primary_intent=extraction.primary_intent,
+        intents=list(extraction.intents),
+        normalized_query=extraction.normalized_query,
+        detected_language=extraction.detected_language,
+        confidence=extraction.confidence,
+        needs_clarification=extraction.needs_clarification,
+    )
+
+
+@app.post("/text-to-speech")
+@app.post("/api/speech", include_in_schema=False)
+async def text_to_speech(request: TextToSpeechRequest) -> StreamingResponse:
+    try:
+        audio = await generate_speech(request.text, request.lang)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Voice generation failed: {exc}") from exc
+    return StreamingResponse(
+        audio,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": 'inline; filename="careos-response.mp3"'},
+    )
+
+
+@app.get("/greeting/{user_id}", response_model=GreetingResponse)
+async def proactive_greeting(
+    user_id: str,
+    family_member_id: str | None = None,
+    preferred_language: str = "en",
+) -> GreetingResponse:
+    try:
+        unresolved = db.get_unresolved_events(user_id, family_member_id, limit=1)
+        greeting = await generate_proactive_greeting(
+            user_id,
+            family_member_id,
+            preferred_language=preferred_language,
+        )
+        return GreetingResponse(
+            greeting=greeting,
+            follow_up_event_id=str(unresolved[0]["id"]) if unresolved else None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not generate greeting: {exc}") from exc
+
+
+@app.get("/daily-digest/{user_id}", response_model=list[InsightCard])
+async def daily_digest(
+    user_id: str,
+    family_member_id: str | None = None,
+    preferred_language: str = "en",
+) -> list[InsightCard]:
+    try:
+        cards = await generate_daily_digest(user_id, family_member_id, preferred_language)
+        return [InsightCard.model_validate(card) for card in cards]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not generate daily digest: {exc}") from exc
 
 
 @app.post("/api/memory/search", response_model=MemorySearchResponse)

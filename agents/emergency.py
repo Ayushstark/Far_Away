@@ -83,8 +83,20 @@ Return:
     return fallback if fallback.is_emergency and not assessment.is_emergency else assessment
 
 
-def emergency_response(data: EmergencyAssessment) -> str:
+def emergency_response(data: EmergencyAssessment, preferred_language: str = "en") -> str:
     steps = "\n".join(f"{index}. {step}" for index, step in enumerate(data.immediate_steps, 1))
+    if preferred_language == "hi":
+        hindi_steps = "\n".join(
+            [
+                "1. अभी आपातकालीन सेवाओं को कॉल करें।",
+                "2. व्यक्ति के साथ रहें और डिस्पैचर के निर्देशों का पालन करें।",
+                "3. चक्कर, सांस की तकलीफ या असुरक्षित महसूस होने पर स्वयं गाड़ी न चलाएँ।",
+            ]
+        )
+        return (
+            f"आपातकालीन चेतावनी: {data.suspected or 'तत्काल चिकित्सा चिंता'}\n"
+            f"अभी {data.call_number} पर कॉल करें।\n\n{hindi_steps}"
+        )
     return (
         f"EMERGENCY ALERT: {data.suspected or 'urgent medical concern'}\n"
         f"Call {data.call_number} now.\n\n{steps}"
