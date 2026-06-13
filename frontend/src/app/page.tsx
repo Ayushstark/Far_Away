@@ -251,7 +251,7 @@ export default function Home() {
       <div className="mx-auto flex h-screen max-w-7xl overflow-hidden bg-white md:my-4 md:h-[calc(100vh-32px)] md:rounded-2xl md:border md:border-[#dfe8e4] md:shadow-xl">
         <DesktopNavigation active={tab} onChange={setTab} />
 
-        <section className="relative flex h-screen min-w-0 flex-1 flex-col">
+        <section className="relative flex h-full min-w-0 flex-1 flex-col">
           <Header tab={tab} activeProfile={activeProfile} />
           {(profilesLoading || profileError) && (
             <ServiceNotice loading={profilesLoading} error={profileError} />
