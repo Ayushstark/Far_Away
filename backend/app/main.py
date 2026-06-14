@@ -43,12 +43,17 @@ from backend.app.config import settings
 app = FastAPI(title="CareOS Healthcare API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=list(settings.allowed_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 orchestrator = Orchestrator()
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"service": "CareOS Healthcare API", "status": "ok", "docs": "/docs"}
 
 
 @app.get("/health")

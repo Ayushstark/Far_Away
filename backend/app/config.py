@@ -24,6 +24,14 @@ class Settings:
     chroma_path: str = os.getenv("CHROMA_PATH", "memory/chroma")
     supabase_url: str = secret("SUPABASE_URL")
     supabase_key: str = secret("SUPABASE_KEY")
+    allowed_origins: tuple[str, ...] = tuple(
+        origin.strip()
+        for origin in os.getenv(
+            "CAREOS_ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
+        if origin.strip()
+    )
 
 
 settings = Settings()

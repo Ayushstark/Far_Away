@@ -214,6 +214,26 @@ The first screen supports sign-in, account creation, and a one-click Ramesh demo
 path. Signed-in sessions persist through refreshes. Use the sign-out icon beside
 the active profile name to return to the account screen.
 
+## Deploy Backend On Render
+
+The repository includes [`render.yaml`](render.yaml). In Render, create a new
+**Blueprint** from this repository, or configure a Web Service with:
+
+```text
+Build command: pip install -r backend/requirements.txt
+Start command: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+Health check path: /health
+```
+
+Do not use `--reload` on Render. Add `GEMINI_API_KEY`, `GROQ_API_KEY`,
+`SUPABASE_URL`, and the backend-only Supabase service-role `SUPABASE_KEY` as
+Render environment variables. Set `CAREOS_ALLOWED_ORIGINS` to the deployed
+frontend URL, for example `https://careos.vercel.app`.
+
+After deployment, set the frontend environment variable
+`NEXT_PUBLIC_API_URL=https://your-careos-service.onrender.com` and redeploy the
+frontend.
+
 ## Demo Dataset
 
 `python seed_data.py` safely upserts a realistic owner profile:
