@@ -31,7 +31,10 @@ import { Session } from "@supabase/supabase-js";
 import { createContext, DragEvent, FormEvent, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { authConfigured, supabase } from "@/lib/supabase";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+  ?? (process.env.NODE_ENV === "production"
+    ? "https://far-away-8cd0.onrender.com"
+    : "http://localhost:8000");
 const DEMO_OWNER_ID = "9000001";
 const OwnerContext = createContext(DEMO_OWNER_ID);
 

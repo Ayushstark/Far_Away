@@ -185,6 +185,10 @@ also accepts the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name. Do not commit a
 `.env.production` file: it can silently force every Vercel build to use an old
 or unrelated backend URL.
 
+The current hackathon deployment also includes browser-safe fallbacks for its
+public Supabase publishable credentials and Render API URL. Private service-role
+and AI provider keys remain backend-only.
+
 Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
 `family_members`, `health_events`, `medications`, and `reports`.
