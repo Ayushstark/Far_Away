@@ -48,6 +48,10 @@ RESOLVED_FOLLOW_UP_TERMS = (
     "better", "fine now", "gone", "resolved", "no pain", "stopped",
     "theek", "thik", "ठीक", "बेहतर", "अब नहीं",
 )
+CLEAR_RESOLVED_FOLLOW_UP_TERMS = (
+    "fine now", "gone", "resolved", "no pain", "stopped", "completely better",
+    "theek ho gaya", "thik ho gaya", "ठीक हो गया", "अब दर्द नहीं", "पूरी तरह बेहतर",
+)
 ONGOING_FOLLOW_UP_TERMS = (
     "still", "same", "worse", "hurts", "pain", "not better",
     "abhi bhi", "same hai", "अभी भी", "वैसा", "बदतर", "दर्द",
@@ -65,10 +69,12 @@ def symptom_severity(message: str) -> str:
 
 def follow_up_outcome(message: str) -> str | None:
     lowered = message.lower()
-    if any(term in lowered for term in RESOLVED_FOLLOW_UP_TERMS):
+    if any(term in lowered for term in CLEAR_RESOLVED_FOLLOW_UP_TERMS):
         return "resolved"
     if any(term in lowered for term in ONGOING_FOLLOW_UP_TERMS):
         return "ongoing"
+    if any(term in lowered for term in RESOLVED_FOLLOW_UP_TERMS):
+        return "resolved"
     return None
 
 
@@ -121,7 +127,9 @@ class Orchestrator:
         emergency_assessment: EmergencyAssessment | None = None,
         previous_assistant_message: str | None = None,
         follow_up_event_id: str | None = None,
+        memory_profile_id: str | None = None,
     ) -> ChatResponse:
+        memory_id = memory_profile_id or profile_id
         # Emergency screening always runs first and can short-circuit all other work.
         emergency = emergency_assessment or await assess_emergency(message)
         if emergency.is_emergency:
@@ -131,7 +139,7 @@ class Orchestrator:
                 emergency,
             )
             self.memory.remember(
-                profile_id,
+                memory_id,
                 message,
                 {"type": "emergency_message", "severity": emergency.severity},
             )
@@ -161,17 +169,39 @@ class Orchestrator:
                     else "I am glad you are feeling better. I will mark this symptom as resolved; tell CareOS or your doctor if it returns."
                 )
             else:
-                reply = (
-                    "समझ गया, लक्षण अभी भी बना हुआ है। मैं इसे जारी दर्ज कर रहा हूँ; अगर यह बढ़े या नया गंभीर लक्षण आए तो डॉक्टर से संपर्क करें।"
-                    if preferred_language == "hi"
-                    else "Understood, the symptom is still present. I will record that; contact a doctor if it worsens or a new serious symptom appears."
+                routed_follow_up = (
+                    f"{message}\n\nThe symptom is ongoing. Continue the assessment "
+                    "proactively using OPQRST / OLD CART. Ask the most important "
+                    "missing questions and provide a cautious differential. "
+                    f"Previous CareOS question: {previous_assistant_message}"
+                )
+                if preferred_language == "hi":
+                    routed_follow_up += "\n\nReply entirely in fluent Hindi using Devanagari."
+                reply = await analyze_symptoms(
+                    routed_follow_up,
+                    [health_history or "No additional health history available."],
                 )
             return ChatResponse(
                 message=reply,
                 intents=["symptom_analysis"],
-                agents_used=["emergency_detector", "care_coordinator"],
-                steps_taken=["Updating your health timeline"],
-                results=[AgentResult(agent="care_coordinator", summary=reply)],
+                agents_used=(
+                    ["emergency_detector", "care_coordinator"]
+                    if outcome == "resolved"
+                    else ["emergency_detector", "symptom_analyst", "care_coordinator"]
+                ),
+                steps_taken=(
+                    ["Updating your health timeline"]
+                    if outcome == "resolved"
+                    else ["Updating your health timeline", "Running OPQRST assessment"]
+                ),
+                results=(
+                    [AgentResult(agent="care_coordinator", summary=reply)]
+                    if outcome == "resolved"
+                    else [
+                        AgentResult(agent="symptom_analyst", summary=reply),
+                        AgentResult(agent="care_coordinator", summary="Follow-up outcome recorded."),
+                    ]
+                ),
                 severity="none" if outcome == "resolved" else "moderate",
                 follow_up_outcome=outcome,
             )
@@ -207,7 +237,7 @@ class Orchestrator:
                 results=[],
             )
 
-        history = [health_history] if health_history else self.memory.recall(profile_id, message)
+        history = [health_history] if health_history else self.memory.recall(memory_id, message)
         intents = list(understood.intents)
         actionable = [intent for intent in intents if intent != "emergency_detection"]
         if not actionable:
@@ -239,6 +269,7 @@ class Orchestrator:
                 history,
                 current_medications or [],
                 preferred_language,
+                memory_id,
             )
             if result:
                 results.append(result)
@@ -281,7 +312,7 @@ class Orchestrator:
                 )
                 steps_taken.append("Finding the right specialist")
 
-        self.memory.remember(profile_id, message, {"type": "user_message"})
+        self.memory.remember(memory_id, message, {"type": "user_message"})
         merged = await merge_responses(results, preferred_language)
         return ChatResponse(
             message=merged,
@@ -300,6 +331,7 @@ class Orchestrator:
         history: list[str],
         current_medications: list[dict],
         preferred_language: str,
+        memory_profile_id: str,
     ) -> AgentResult | None:
         if intent == "symptom_analysis":
             return AgentResult(
@@ -328,7 +360,7 @@ class Orchestrator:
             return AgentResult(
                 agent="care_coordinator",
                 summary=await create_care_brief(
-                    profile_id,
+                    memory_profile_id,
                     self.memory,
                     health_history="\n".join(history),
                     current_medications=current_medications,

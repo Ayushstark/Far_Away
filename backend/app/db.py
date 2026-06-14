@@ -37,6 +37,28 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     return response.data[0] if response.data else None
 
 
+def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:
+    response = (
+        get_client()
+        .table("family_members")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .eq("id", family_member_id)
+        .limit(1)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def get_profile(user_id: str, family_member_id: str | None = None) -> dict[str, Any] | None:
+    """Return the selected person's profile without leaking the owner's context."""
+    return (
+        get_family_member(user_id, family_member_id)
+        if family_member_id
+        else get_user(user_id)
+    )
+
+
 def get_health_history(
     user_id: str,
     family_member_id: str | None = None,

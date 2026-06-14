@@ -33,6 +33,9 @@ hackathon MVP is ready for demonstration.**
 - Indian-accent Hindi/English gTTS output with Hindi/English speech input
 - Proactive greetings, daily insight cards, and unresolved-symptom follow-ups
 - Visible multi-agent thinking trail and autonomous medication/specialist checks
+- OPQRST/OLD CART guided symptom follow-ups and cautious differential reasoning
+- Strict owner/family-member context isolation across UI, Supabase, and ChromaDB
+- Automatic CareOS voice replies and delayed hands-free voice-message sending
 
 ### Build Progress
 
@@ -44,6 +47,7 @@ hackathon MVP is ready for demonstration.**
 | 4 | Reports, medications, family, and profile screens | Complete |
 | 5 | Demo data, interface polish, tests, and documentation | Complete |
 | Companion upgrade | gTTS, proactive greeting, agent trail, follow-up loop, daily digest | Complete |
+| Family isolation | Profile-scoped chat, memory, medications, reports, insights, and timelines | Complete |
 
 ## Five-Agent Architecture
 
@@ -68,6 +72,19 @@ flowchart LR
 The emergency detector runs before all other agents on every chat message.
 Gemini handles the main reasoning, PDF understanding, and semantic embeddings.
 Groq handles the speed-sensitive emergency layer and fast fallback responses.
+
+## Memory And Family Profiles
+
+CareOS retains health-condition context rather than restoring a word-for-word
+chat transcript. Healthcare messages are saved as profile-scoped Supabase
+`health_events`, while ChromaDB stores semantic memories for later symptom
+analysis. Casual small talk is intentionally not persisted.
+
+Every family member has an isolated context. Selecting a family profile switches
+the chat, greeting, daily digest, health timeline, reports, medications, doctor
+brief, new health events, and ChromaDB memory namespace to that person. In-flight
+requests from the previously selected profile are cancelled or ignored, so an
+owner medication such as Ramesh's Metformin cannot appear in Sita's view.
 
 ## Request Flow
 
@@ -199,6 +216,8 @@ profile and the live Supabase project's `bigint` identifiers.
 5. Open **Medications**, review the four active medicines, then check an
    interaction before adding a new medicine.
 6. Open **Family** to add or switch a dependent profile.
+   Show that switching to Sita clears Ramesh's chat and medication insights and
+   loads only Sita's profile-scoped health context.
 7. Open **Profile** and download the doctor visit brief.
 8. Refresh Chat to hear CareOS speak first, then select **हिंदी** to show the
    Hindi greeting, Hindi chat, and Hindi voice output.
@@ -234,7 +253,7 @@ npm run lint
 npm run build
 ```
 
-Current automated verification: **32 backend tests passing**, frontend lint
+Current automated verification: **38 backend tests passing**, frontend lint
 and TypeScript checks passing.
 
 ## What Is Already Done
@@ -251,7 +270,9 @@ and TypeScript checks passing.
 - Proactive contextual greeting that speaks first
 - Autonomous symptom-to-medication-to-specialist agent chain
 - Follow-up memory loop that resolves the originating health event
+- OPQRST/OLD CART symptom assessment for new and ongoing complaints
 - Daily medication, trend, follow-up, and report insight cards
+- Strict family-profile data isolation with stale-request protection
 - Live Supabase-compatible demo seed and schema migration
 - Loading, empty, progress, and error states across primary workflows
 - Backend API/database tests and frontend production verification

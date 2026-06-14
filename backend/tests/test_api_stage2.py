@@ -18,6 +18,7 @@ def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
 
     async def run(message, profile_id, health_history, current_medications, **kwargs):
         calls["context"] = (health_history, current_medications)
+        calls["memory_profile_id"] = kwargs["memory_profile_id"]
         return ChatResponse(
             message="Track symptoms.",
             intents=["symptom_analysis"],
@@ -37,6 +38,7 @@ def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
     assert calls["context"] == ("Recent headache", [{"drug_name": "Metformin"}])
     assert calls["event"]["family_member_id"] == "family-1"
     assert calls["event"]["ai_response"] == "Track symptoms."
+    assert calls["memory_profile_id"] == "user-1:family:family-1"
 
 
 def test_chat_returns_response_when_event_save_temporarily_fails(monkeypatch) -> None:
@@ -130,6 +132,22 @@ def test_greeting_endpoint_returns_proactive_message(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["greeting"].startswith("Good morning")
     assert calls["preferred_language"] == "hi"
+
+
+def test_family_greeting_uses_selected_family_profile(monkeypatch) -> None:
+    monkeypatch.setattr(db, "get_unresolved_events", lambda *args, **kwargs: [])
+    monkeypatch.setattr(db, "get_recent_health_events", lambda *args, **kwargs: [])
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda user_id, family_member_id: {"id": family_member_id, "name": "Sita Devi"},
+    )
+
+    response = client.get("/greeting/user-1?family_member_id=family-1")
+
+    assert response.status_code == 200
+    assert "Sita Devi" in response.json()["greeting"]
 
 
 def test_daily_digest_endpoint_returns_cards(monkeypatch) -> None:
@@ -226,7 +244,7 @@ def test_family_medication_and_history_routes(monkeypatch) -> None:
 def test_doctor_brief_uses_database_context(monkeypatch) -> None:
     monkeypatch.setattr(db, "get_health_history", lambda *args, **kwargs: "Timeline")
     monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [{"drug_name": "Metformin"}])
-    monkeypatch.setattr(db, "get_user", lambda user_id: {"id": user_id, "name": "Ramesh"})
+    monkeypatch.setattr(db, "get_profile", lambda user_id, family_member_id=None: {"id": user_id, "name": "Ramesh"})
 
     async def brief(*args, **kwargs):
         assert kwargs["health_history"] == "Timeline"

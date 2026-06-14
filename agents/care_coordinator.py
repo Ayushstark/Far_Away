@@ -16,7 +16,7 @@ async def generate_proactive_greeting(
     unresolved_events = db.get_unresolved_events(user_id, family_member_id, limit=1)
     recent_events = db.get_recent_health_events(user_id, family_member_id, limit=5)
     medications = db.get_medications(user_id, family_member_id)
-    profile = db.get_user(user_id) or {}
+    profile = db.get_profile(user_id, family_member_id) or {}
     name = profile.get("name") or "there"
     if unresolved_events:
         event = unresolved_events[0]
@@ -61,6 +61,8 @@ async def generate_daily_digest(
     medications = db.get_medications(user_id, family_member_id)
     reports = db.get_reports(user_id, family_member_id, limit=3)
     fallback = _daily_digest_fallback(events, medications, reports, preferred_language)
+    if not events and not medications and not reports:
+        return fallback
     result = await complete_json(
         "You create short, useful daily health insight cards without diagnosing.",
         f"""

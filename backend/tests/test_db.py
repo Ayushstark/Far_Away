@@ -104,6 +104,18 @@ def test_get_medications_scopes_family_member(monkeypatch) -> None:
     assert ("medications", "eq", "family_member_id", "family-1") in client.calls
 
 
+def test_get_profile_switches_to_selected_family_member(monkeypatch) -> None:
+    rows = [{"id": "family-1", "owner_id": "user-1", "name": "Sita Devi"}]
+    client = FakeClient({"family_members": rows})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.get_profile("user-1", "family-1")
+
+    assert result["name"] == "Sita Devi"
+    assert ("family_members", "eq", "owner_id", "user-1") in client.calls
+    assert ("family_members", "eq", "id", "family-1") in client.calls
+
+
 def test_get_recent_health_events_returns_structured_context(monkeypatch) -> None:
     rows = [{"id": "event-1", "description": "Headache", "resolved": False}]
     client = FakeClient({"health_events": rows})

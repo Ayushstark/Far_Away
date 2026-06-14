@@ -160,6 +160,7 @@ export default function Home() {
   const [insightCards, setInsightCards] = useState<InsightCard[]>([]);
   const [digestLoading, setDigestLoading] = useState(true);
   const [listening, setListening] = useState(false);
+  const [voiceSendSeconds, setVoiceSendSeconds] = useState<number | null>(null);
   const preferredLanguage = useSyncExternalStore(
     subscribeLanguage,
     getLanguageSnapshot,
@@ -173,14 +174,29 @@ export default function Home() {
   const [family, setFamily] = useState<Profile[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const greetingLanguageRef = useRef<PreferredLanguage | null>(null);
+  const greetingScopeRef = useRef<string | null>(null);
+  const activeProfileScopeRef = useRef(OWNER_ID);
   const greetingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const responseAudioRef = useRef<HTMLAudioElement | null>(null);
   const followUpEventIdRef = useRef<string | null>(null);
+  const voiceTranscriptRef = useRef("");
+  const voiceSendTimerRef = useRef<number | null>(null);
+  const voiceCountdownRef = useRef<number | null>(null);
   const conversationEnd = useRef<HTMLDivElement>(null);
+  const activeProfileId = String(activeProfile.id);
+  const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
 
   useEffect(() => {
     conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    return () => {
+      if (voiceSendTimerRef.current !== null) window.clearTimeout(voiceSendTimerRef.current);
+      if (voiceCountdownRef.current !== null) window.clearInterval(voiceCountdownRef.current);
+      responseAudioRef.current?.pause();
+    };
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -197,30 +213,37 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (greetingLanguageRef.current === preferredLanguage) return;
-    greetingLanguageRef.current = preferredLanguage;
+    const scope = `${activeProfileId}:${preferredLanguage}`;
+    if (greetingScopeRef.current === scope) return;
+    greetingScopeRef.current = scope;
     setGreetingLoading(true);
+    followUpEventIdRef.current = null;
+    responseAudioRef.current?.pause();
+    const controller = new AbortController();
 
     axios.get<{ greeting: string; follow_up_event_id: string | null }>(`${API_URL}/greeting/${OWNER_ID}`, {
-      params: { preferred_language: preferredLanguage },
+      params: {
+        family_member_id: familyMemberId,
+        preferred_language: preferredLanguage,
+      },
+      signal: controller.signal,
     })
       .then(async ({ data }) => {
+        if (greetingScopeRef.current !== scope) return;
         followUpEventIdRef.current = data.follow_up_event_id;
-        setMessages((current) => {
-          const nextGreeting = {
-            id: "proactive-greeting",
-            speaker: "assistant" as const,
-            text: data.greeting,
-            agents: ["care_coordinator"],
-          };
-          const withoutGreeting = current.filter((message) =>
-            !["proactive-greeting", "welcome-fallback"].includes(message.id)
-          );
-          return [nextGreeting, ...withoutGreeting];
-        });
+        setMessages([{
+          id: "proactive-greeting",
+          speaker: "assistant" as const,
+          text: data.greeting,
+          agents: ["care_coordinator"],
+        }]);
 
         // Browsers may require a prior tap for autoplay; manual speaker playback remains available.
         const { audio, url } = await createCareOSAudio(data.greeting, preferredLanguage);
+        if (greetingScopeRef.current !== scope) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         greetingAudioRef.current = audio;
         audio.onended = () => URL.revokeObjectURL(url);
         audio.onerror = () => URL.revokeObjectURL(url);
@@ -230,36 +253,91 @@ export default function Home() {
           // Autoplay may be blocked until the first user interaction.
         }
       })
-      .catch(() => {
-        setMessages((current) => [{
+      .catch((error) => {
+        if (axios.isCancel(error) || greetingScopeRef.current !== scope) return;
+        setMessages([{
           id: "welcome-fallback",
           speaker: "assistant",
           text: preferredLanguage === "hi"
             ? "नमस्ते, मैं CareOS हूँ। पिछली बातचीत के बाद से आपकी तबीयत कैसी रही है?"
             : "Hi, I am CareOS. How have you been feeling since your last check-in?",
           agents: ["care_coordinator"],
-        }, ...current.filter((message) => !["proactive-greeting", "welcome-fallback"].includes(message.id))]);
+        }]);
       })
-      .finally(() => setGreetingLoading(false));
+      .finally(() => {
+        if (greetingScopeRef.current === scope) setGreetingLoading(false);
+      });
 
-    return () => greetingAudioRef.current?.pause();
-  }, [preferredLanguage]);
+    return () => {
+      controller.abort();
+      greetingAudioRef.current?.pause();
+    };
+  }, [activeProfileId, familyMemberId, preferredLanguage]);
 
   useEffect(() => {
+    const scope = `${activeProfileId}:${preferredLanguage}`;
+    const controller = new AbortController();
     axios.get<InsightCard[]>(`${API_URL}/daily-digest/${OWNER_ID}`, {
-      params: { preferred_language: preferredLanguage },
+      params: {
+        family_member_id: familyMemberId,
+        preferred_language: preferredLanguage,
+      },
+      signal: controller.signal,
     })
-      .then(({ data }) => setInsightCards(data))
-      .catch(() => setInsightCards([]))
-      .finally(() => setDigestLoading(false));
-  }, [preferredLanguage]);
-
-  const activeProfileId = String(activeProfile.id);
-  const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
+      .then(({ data }) => {
+        if (`${String(activeProfile.id)}:${preferredLanguage}` === scope) setInsightCards(data);
+      })
+      .catch((error) => {
+        if (!axios.isCancel(error) && activeProfileScopeRef.current === activeProfileId) {
+          setInsightCards([]);
+        }
+      })
+      .finally(() => {
+        if (activeProfileScopeRef.current === activeProfileId) setDigestLoading(false);
+      });
+    return () => controller.abort();
+  }, [activeProfile.id, activeProfileId, familyMemberId, preferredLanguage]);
 
   function setPreferredLanguage(language: PreferredLanguage) {
     window.localStorage.setItem("careos-language", language);
     window.dispatchEvent(new Event(LANGUAGE_EVENT));
+  }
+
+  function selectActiveProfile(profile: Profile) {
+    cancelVoiceAutoSend();
+    responseAudioRef.current?.pause();
+    setMessages([]);
+    setInsightCards([]);
+    setDigestLoading(true);
+    activeProfileScopeRef.current = String(profile.id);
+    setActiveProfile(profile);
+    setTab("chat");
+  }
+
+  function cancelVoiceAutoSend() {
+    if (voiceSendTimerRef.current !== null) window.clearTimeout(voiceSendTimerRef.current);
+    if (voiceCountdownRef.current !== null) window.clearInterval(voiceCountdownRef.current);
+    voiceSendTimerRef.current = null;
+    voiceCountdownRef.current = null;
+    setVoiceSendSeconds(null);
+  }
+
+  function handleInput(value: string) {
+    cancelVoiceAutoSend();
+    setInput(value);
+  }
+
+  async function speakCareOS(text: string) {
+    responseAudioRef.current?.pause();
+    try {
+      const { audio, url } = await createCareOSAudio(text, preferredLanguage);
+      responseAudioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch {
+      // Manual playback remains available when browser autoplay is blocked.
+    }
   }
 
   async function sendMessage(event: FormEvent) {
@@ -270,7 +348,9 @@ export default function Home() {
 
   async function sendPrompt(text: string) {
     if (!text || loading) return;
+    const requestProfileScope = activeProfileScopeRef.current;
 
+    cancelVoiceAutoSend();
     setInput("");
     setMessages((current) => [
       ...current,
@@ -287,6 +367,7 @@ export default function Home() {
         previous_assistant_message: [...messages].reverse().find((message) => message.speaker === "assistant")?.text,
         follow_up_event_id: followUpEventIdRef.current,
       });
+      if (activeProfileScopeRef.current !== requestProfileScope) return;
       if (data.message.toLowerCase().includes("mark this symptom as resolved") || data.message.includes("ठीक हुआ दर्ज")) {
         followUpEventIdRef.current = null;
       }
@@ -308,6 +389,7 @@ export default function Home() {
           agents: data.agents_used,
         },
       ]);
+      void speakCareOS(data.message);
       setThinkingSteps([]);
       if (data.emergency) {
         setEmergency(
@@ -319,6 +401,7 @@ export default function Home() {
         );
       }
     } catch (error) {
+      if (activeProfileScopeRef.current !== requestProfileScope) return;
       setThinkingSteps([]);
       const detail = axios.isAxiosError(error) && error.response?.data?.detail;
       setMessages((current) => [
@@ -344,6 +427,7 @@ export default function Home() {
   }
 
   async function toggleVoiceInput() {
+    cancelVoiceAutoSend();
     if (listening) {
       recognitionRef.current?.stop();
       setListening(false);
@@ -380,12 +464,32 @@ export default function Home() {
     }
 
     const recognition = new SpeechRecognition();
+    voiceTranscriptRef.current = "";
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = preferredLanguage === "hi" ? "hi-IN" : "en-IN";
-    recognition.onresult = (event) => setInput(event.results[0][0].transcript);
-    recognition.onend = () => setListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.trim();
+      voiceTranscriptRef.current = transcript;
+      setInput(transcript);
+    };
+    recognition.onend = () => {
+      setListening(false);
+      const transcript = voiceTranscriptRef.current.trim();
+      if (!transcript) return;
+      let seconds = 10;
+      setVoiceSendSeconds(seconds);
+      voiceCountdownRef.current = window.setInterval(() => {
+        seconds -= 1;
+        setVoiceSendSeconds(Math.max(seconds, 0));
+      }, 1000);
+      voiceSendTimerRef.current = window.setTimeout(() => {
+        cancelVoiceAutoSend();
+        void sendPrompt(transcript);
+      }, 10_000);
+    };
     recognition.onerror = (event) => {
+      cancelVoiceAutoSend();
       setListening(false);
       const errors: Record<string, string> = {
         "not-allowed": "Microphone access was denied. Allow it in the browser's site permissions and try again.",
@@ -426,7 +530,9 @@ export default function Home() {
               preferredLanguage={preferredLanguage}
               messages={messages}
               conversationEnd={conversationEnd}
-              onInput={setInput}
+              onInput={handleInput}
+              voiceSendSeconds={voiceSendSeconds}
+              onCancelVoiceSend={cancelVoiceAutoSend}
               onSend={sendMessage}
               onVoice={toggleVoiceInput}
               onLanguage={setPreferredLanguage}
@@ -442,7 +548,7 @@ export default function Home() {
               family={family}
               owner={ownerProfile}
               onFamilyChange={setFamily}
-              onSelect={setActiveProfile}
+              onSelect={selectActiveProfile}
             />
           ) : (
             <ProfileScreen profile={activeProfile} familyMemberId={familyMemberId} />
@@ -537,6 +643,8 @@ function ChatScreen({
   onVoice,
   onLanguage,
   onInsight,
+  voiceSendSeconds,
+  onCancelVoiceSend,
 }: {
   input: string;
   loading: boolean;
@@ -553,6 +661,8 @@ function ChatScreen({
   onVoice: () => void;
   onLanguage: (language: PreferredLanguage) => void;
   onInsight: (text: string) => void;
+  voiceSendSeconds: number | null;
+  onCancelVoiceSend: () => void;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -636,6 +746,22 @@ function ChatScreen({
             <Send size={18} />
           </button>
         </form>
+        {voiceSendSeconds !== null && (
+          <div className="mx-auto mt-2 flex max-w-3xl items-center justify-between rounded-md bg-[#eef7f3] px-3 py-2 text-xs text-[#45665a]">
+            <span>
+              {preferredLanguage === "hi"
+                ? `आवाज़ संदेश ${voiceSendSeconds} सेकंड में भेजा जाएगा`
+                : `Voice message will send automatically in ${voiceSendSeconds}s`}
+            </span>
+            <button
+              type="button"
+              onClick={onCancelVoiceSend}
+              className="font-semibold text-[#12664f]"
+            >
+              {preferredLanguage === "hi" ? "रोकें" : "Cancel"}
+            </button>
+          </div>
+        )}
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-[#809087]">
           CareOS provides general health information, not a diagnosis.
         </p>
@@ -756,6 +882,8 @@ function ThinkingTrail({
     "Analyzing symptoms": { icon: <HeartPulse size={15} />, hi: "लक्षणों का विश्लेषण कर रहा हूँ" },
     "Checking your medications": { icon: <Pill size={15} />, hi: "आपकी दवाओं की जाँच कर रहा हूँ" },
     "Finding the right specialist": { icon: <UserRound size={15} />, hi: "सही विशेषज्ञ ढूँढ रहा हूँ" },
+    "Updating your health timeline": { icon: <FileText size={15} />, hi: "आपकी स्वास्थ्य समयरेखा अपडेट कर रहा हूँ" },
+    "Running OPQRST assessment": { icon: <HeartPulse size={15} />, hi: "OPQRST लक्षण आकलन कर रहा हूँ" },
     Done: { icon: <HeartPulse size={15} />, hi: "पूरा हुआ" },
   };
   return (
@@ -827,13 +955,20 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     axios
       .get<Report[]>(`${API_URL}/reports/${OWNER_ID}`, {
         params: { family_member_id: familyMemberId },
+        signal: controller.signal,
       })
       .then(({ data }) => setReports(data))
-      .catch(() => setError("Could not load reports."))
-      .finally(() => setInitialLoading(false));
+      .catch((error) => {
+        if (!axios.isCancel(error)) setError("Could not load reports.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setInitialLoading(false);
+      });
+    return () => controller.abort();
   }, [familyMemberId]);
 
   async function loadReports() {
@@ -949,13 +1084,20 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   }, [medications, remindersEnabled]);
 
   useEffect(() => {
+    const controller = new AbortController();
     axios
       .get<Medication[]>(`${API_URL}/medications/${OWNER_ID}`, {
         params: { family_member_id: familyMemberId },
+        signal: controller.signal,
       })
       .then(({ data }) => setMedications(data))
-      .catch(() => setError("Could not load medications."))
-      .finally(() => setInitialLoading(false));
+      .catch((error) => {
+        if (!axios.isCancel(error)) setError("Could not load medications.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setInitialLoading(false);
+      });
+    return () => controller.abort();
   }, [familyMemberId]);
 
   async function loadMedications() {
@@ -1106,6 +1248,13 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
 
   return (
     <ScreenShell title="Family profiles" description="Switch profiles to manage care for dependents.">
+      <div className="rounded-md border border-[#b8d8ca] bg-[#f1f8f5] p-4">
+        <p className="text-xs font-semibold uppercase text-[#527166]">Currently viewing</p>
+        <p className="mt-1 text-base font-semibold text-[#12664f]">{activeProfile.name}</p>
+        <p className="mt-1 text-xs leading-5 text-[#60736a]">
+          Chat, reports, medications, profile details, insights, and CareOS memory now use this person&apos;s health context.
+        </p>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {[owner, ...family].map((profile) => (
           <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-md border p-4 text-left ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] bg-[#f1f8f5]" : "border-[#dfe8e4]"}`}>
@@ -1135,6 +1284,24 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
 function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMemberId?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const historyScope = familyMemberId ?? OWNER_ID;
+  const [historyState, setHistoryState] = useState({ scope: "", text: "" });
+  const historyLoading = historyState.scope !== historyScope;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    axios.get<{ history: string }>(`${API_URL}/history/${OWNER_ID}`, {
+      params: { family_member_id: familyMemberId },
+      signal: controller.signal,
+    })
+      .then(({ data }) => setHistoryState({ scope: historyScope, text: data.history }))
+      .catch((error) => {
+        if (!axios.isCancel(error)) {
+          setHistoryState({ scope: historyScope, text: "Health timeline could not be loaded." });
+        }
+      });
+    return () => controller.abort();
+  }, [familyMemberId, historyScope]);
 
   async function downloadBrief() {
     setBusy(true);
@@ -1167,6 +1334,12 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
       </div>
       <ProfileField label="Known conditions" value={profile.known_conditions?.join(", ")} />
       <ProfileField label="Allergies" value={profile.allergies?.join(", ")} />
+      <section className="rounded-md border border-[#dfe8e4] p-4">
+        <p className="text-xs font-semibold uppercase text-[#71827a]">Health timeline</p>
+        {historyLoading
+          ? <p className="mt-3 text-sm text-[#687971]">Loading health details...</p>
+          : <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#35463e]">{historyState.text}</p>}
+      </section>
       <ErrorText text={error} />
       <button onClick={downloadBrief} disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#12664f] text-sm font-semibold text-white disabled:opacity-50 sm:w-auto sm:px-5">
         {busy ? <LoaderCircle className="animate-spin" size={18} /> : <Download size={18} />}

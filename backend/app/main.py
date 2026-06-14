@@ -87,6 +87,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
             emergency_assessment=emergency,
             previous_assistant_message=request.previous_assistant_message,
             follow_up_event_id=request.follow_up_event_id,
+            memory_profile_id=(
+                f"{request.profile_id}:family:{request.family_member_id}"
+                if request.family_member_id
+                else request.profile_id
+            ),
         )
         if response.follow_up_outcome == "resolved" and request.follow_up_event_id:
             try:
@@ -338,7 +343,7 @@ async def doctor_brief(
             user_id,
             health_history=db.get_health_history(user_id, family_member_id, limit=100),
             current_medications=db.get_medications(user_id, family_member_id),
-            user_profile=db.get_user(user_id),
+            user_profile=db.get_profile(user_id, family_member_id),
         )
         return CareBriefResponse(profile_id=user_id, brief=brief)
     except Exception as exc:
@@ -392,7 +397,7 @@ async def care_brief_pdf(
         profile_id,
         health_history=db.get_health_history(profile_id, family_member_id, limit=100),
         current_medications=db.get_medications(profile_id, family_member_id),
-        user_profile=db.get_user(profile_id),
+        user_profile=db.get_profile(profile_id, family_member_id),
     )
     return StreamingResponse(
         BytesIO(brief_to_pdf(brief)),

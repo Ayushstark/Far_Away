@@ -13,7 +13,7 @@ from backend.app.services.input_understanding import (
 )
 from backend.app.schemas import EmergencyAssessment
 from backend.app.services.intent_classifier import classify_intent_fallback
-from agents import emergency
+from agents import care_coordinator, emergency, symptom
 from memory.store import HealthMemory
 
 
@@ -262,3 +262,71 @@ def test_follow_up_outcome_is_detected_before_general_intent_routing() -> None:
 
     assert response.follow_up_outcome == "resolved"
     assert response.steps_taken == ["Updating your health timeline"]
+
+
+def test_ongoing_follow_up_runs_opqrst_assessment(monkeypatch) -> None:
+    async def structured_assessment(message, history):
+        assert "OPQRST / OLD CART" in message
+        assert "still hurts" in message
+        return "When did it start, what worsens it, and how severe is it from 0-10?"
+
+    monkeypatch.setattr("backend.app.services.orchestrator.analyze_symptoms", structured_assessment)
+    response = asyncio.run(
+        Orchestrator(memory=HealthMemory(persistent=False)).run(
+            "It still hurts",
+            "user-1",
+            health_history="Previous foot tingling",
+            previous_assistant_message="How is your tingling now?",
+            follow_up_event_id="event-1",
+            emergency_assessment=EmergencyAssessment(),
+        )
+    )
+
+    assert response.follow_up_outcome == "ongoing"
+    assert "symptom_analyst" in response.agents_used
+    assert response.steps_taken == [
+        "Updating your health timeline",
+        "Running OPQRST assessment",
+    ]
+
+
+def test_partial_improvement_with_persistent_pain_stays_ongoing() -> None:
+    from backend.app.services.orchestrator import follow_up_outcome
+
+    assert follow_up_outcome("I feel a bit better, but the pain still exists") == "ongoing"
+    assert follow_up_outcome("The pain is gone now") == "resolved"
+
+
+def test_symptom_agent_prompt_uses_opqrst_and_old_cart(monkeypatch) -> None:
+    calls: dict[str, str] = {}
+
+    async def complete(system, prompt, **kwargs):
+        calls["system"] = system
+        calls["prompt"] = prompt
+        return "When did this start? " + ("Structured assessment details. " * 12)
+
+    monkeypatch.setattr(symptom, "complete", complete)
+    result = asyncio.run(symptom.analyze_symptoms("My knee hurts", ["No history"]))
+
+    assert result.startswith("When did this start?")
+    assert "OPQRST" in calls["system"]
+    assert "OLD CART" in calls["prompt"]
+
+
+def test_empty_family_digest_never_invents_health_claims(monkeypatch) -> None:
+    monkeypatch.setattr(db, "get_recent_health_events", lambda *args, **kwargs: [])
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [])
+    monkeypatch.setattr(db, "get_reports", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        care_coordinator,
+        "complete_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("LLM should not run")),
+    )
+
+    cards = asyncio.run(care_coordinator.generate_daily_digest("user-1", "family-1"))
+
+    assert cards == [{
+        "type": "trend_positive",
+        "icon_emoji": "✓",
+        "text": "Take one small moment to check in with your health today.",
+    }]
