@@ -1,6 +1,6 @@
 from io import BytesIO
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -27,6 +27,7 @@ from backend.app.schemas import (
     IntentClassificationResponse,
     IntentExtractionResponse,
     TextToSpeechRequest,
+    AuthProfileRequest,
     FamilyMemberCreate,
     MedicationCreate,
     HistoryResponse,
@@ -58,6 +59,35 @@ async def health() -> dict[str, str | bool]:
         "gemini_configured": bool(settings.gemini_api_key),
         "groq_configured": bool(settings.groq_api_key),
     }
+
+
+@app.post("/auth/profile")
+async def authenticated_profile(
+    request: AuthProfileRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Resolve or create the CareOS profile for a verified Supabase session."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="A valid sign-in session is required.")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        auth_response = db.get_client().auth.get_user(token)
+        auth_user = auth_response.user
+        if not auth_user:
+            raise HTTPException(status_code=401, detail="The sign-in session is invalid.")
+        metadata = auth_user.user_metadata or {}
+        name = request.name.strip() or str(metadata.get("name") or "").strip()
+        if not name:
+            name = (auth_user.email or "CareOS user").split("@", 1)[0]
+        return db.create_authenticated_user(
+            auth_user_id=str(auth_user.id),
+            name=name,
+            email=auth_user.email or "",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load signed-in profile: {exc}") from exc
 
 
 @app.post("/chat", response_model=ChatResponse)

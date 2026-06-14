@@ -36,6 +36,8 @@ hackathon MVP is ready for demonstration.**
 - OPQRST/OLD CART guided symptom follow-ups and cautious differential reasoning
 - Strict owner/family-member context isolation across UI, Supabase, and ChromaDB
 - Automatic CareOS voice replies and delayed hands-free voice-message sending
+- Supabase email/password sign-up, sign-in, persistent sessions, and sign-out
+- Verified Auth UUID to isolated CareOS profile mapping, with the Ramesh demo preserved
 
 ### Build Progress
 
@@ -48,12 +50,14 @@ hackathon MVP is ready for demonstration.**
 | 5 | Demo data, interface polish, tests, and documentation | Complete |
 | Companion upgrade | gTTS, proactive greeting, agent trail, follow-up loop, daily digest | Complete |
 | Family isolation | Profile-scoped chat, memory, medications, reports, insights, and timelines | Complete |
+| Account access | Supabase Auth sign-up, sign-in, session persistence, profile mapping, and sign-out | Complete |
 
 ## Five-Agent Architecture
 
 ```mermaid
 flowchart LR
-    U["User or family profile"] --> API["FastAPI"]
+    U["Signed-in user or demo profile"] --> AUTH["Supabase Auth"]
+    AUTH --> API["FastAPI + verified profile mapping"]
     API --> E["Emergency detector<br/>Groq Llama 3.1 8B"]
     E -->|Emergency| ALERT["Immediate steps + Call 112"]
     E -->|Clear| O["CareOS orchestrator<br/>Gemini Flash"]
@@ -85,6 +89,11 @@ the chat, greeting, daily digest, health timeline, reports, medications, doctor
 brief, new health events, and ChromaDB memory namespace to that person. In-flight
 requests from the previously selected profile are cancelled or ignored, so an
 owner medication such as Ramesh's Metformin cannot appear in Sita's view.
+
+Supabase Auth identities use UUIDs while the existing CareOS schema uses bigint
+profile IDs. `POST /auth/profile` verifies the Supabase access token, then safely
+resolves or creates the matching CareOS owner profile. The service-role key
+remains backend-only; the frontend receives only the public Supabase anon key.
 
 ## Request Flow
 
@@ -157,10 +166,14 @@ GROQ_API_KEY=your_groq_api_key
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_service_role_key
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 The backend must use the Supabase **service role** key. Never expose that key in
-the frontend or commit `.env`.
+the frontend or commit `.env`. Put the two `NEXT_PUBLIC_...` values in
+`frontend/.env.local`; the anon key is safe for browser authentication, but the
+service-role key is not.
 
 Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
@@ -168,7 +181,10 @@ the five tables described by the project architecture: `users`,
 
 Run [`supabase_schema_fix.sql`](supabase_schema_fix.sql) once in the Supabase SQL
 editor. It fixes the live project's misspelled health-event foreign key and
-allows owner records without requiring a family member.
+allows owner records without requiring a family member. It also adds the
+`auth_user_id` and `email` fields required to map Supabase Auth accounts to
+CareOS profiles. Enable Email authentication in Supabase Authentication; email
+confirmation may be enabled or disabled depending on the desired demo flow.
 
 ### 2. Install and run the backend
 
@@ -192,6 +208,10 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+The first screen supports sign-in, account creation, and a one-click Ramesh demo
+path. Signed-in sessions persist through refreshes. Use the sign-out icon beside
+the active profile name to return to the account screen.
+
 ## Demo Dataset
 
 `python seed_data.py` safely upserts a realistic owner profile:
@@ -206,16 +226,17 @@ profile and the live Supabase project's `bigint` identifiers.
 
 ## How To Demo
 
-1. Start on **Chat** and ask: `I have mild tingling in both feet at night.`
-2. Show that CareOS uses Ramesh's existing diabetes history and routes the
+1. Create a new account or choose **Continue with Ramesh demo**.
+2. Start on **Chat** and ask: `I have mild tingling in both feet at night.`
+3. Show that CareOS uses Ramesh's existing diabetes history and routes the
    message to the symptom analyst.
-3. Ask: `I have crushing chest pain and difficulty breathing.` Show the
+4. Ask: `I have crushing chest pain and difficulty breathing.` Show the
    emergency-first red alert and prominent `Call 112` action.
-4. Open **Reports**, expand both seeded reports, and highlight the improving
+5. Open **Reports**, expand both seeded reports, and highlight the improving
    HbA1c trend. Upload a PDF to demonstrate Gemini report reading.
-5. Open **Medications**, review the four active medicines, then check an
+6. Open **Medications**, review the four active medicines, then check an
    interaction before adding a new medicine.
-6. Open **Family** to add or switch a dependent profile.
+7. Open **Family** to add or switch a dependent profile.
    Show that switching to Sita clears Ramesh's chat and medication insights and
    loads only Sita's profile-scoped health context.
 7. Open **Profile** and download the doctor visit brief.

@@ -1,4 +1,5 @@
 from io import BytesIO
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,35 @@ import backend.app.main as api
 
 
 client = TestClient(app)
+
+
+def test_auth_profile_requires_bearer_token() -> None:
+    response = client.post("/auth/profile", json={"name": "New user"})
+    assert response.status_code == 401
+
+
+def test_auth_profile_maps_verified_supabase_user(monkeypatch) -> None:
+    auth_user = SimpleNamespace(
+        id="auth-user-1",
+        email="asha@example.com",
+        user_metadata={"name": "Asha"},
+    )
+    auth = SimpleNamespace(get_user=lambda token: SimpleNamespace(user=auth_user))
+    monkeypatch.setattr(db, "get_client", lambda: SimpleNamespace(auth=auth))
+    monkeypatch.setattr(
+        db,
+        "create_authenticated_user",
+        lambda **kwargs: {"id": 12345, "name": kwargs["name"], "email": kwargs["email"]},
+    )
+
+    response = client.post(
+        "/auth/profile",
+        json={},
+        headers={"Authorization": "Bearer valid-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 12345, "name": "Asha", "email": "asha@example.com"}
 
 
 def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:

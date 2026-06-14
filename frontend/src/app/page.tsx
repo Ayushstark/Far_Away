@@ -11,6 +11,7 @@ import {
   FileText,
   HeartPulse,
   LoaderCircle,
+  LogOut,
   MessageCircle,
   Mic,
   MicOff,
@@ -25,10 +26,17 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { DragEvent, FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Session } from "@supabase/supabase-js";
+import { createContext, DragEvent, FormEvent, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { authConfigured, supabase } from "@/lib/supabase";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const OWNER_ID = "9000001";
+const DEMO_OWNER_ID = "9000001";
+const OwnerContext = createContext(DEMO_OWNER_ID);
+
+function useOwnerId() {
+  return useContext(OwnerContext);
+}
 
 type Tab = "chat" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
@@ -152,6 +160,60 @@ const tabTitles: Record<Exclude<Tab, "chat">, string> = {
 };
 
 export default function Home() {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [ownerId, setOwnerId] = useState("");
+  const [accountError, setAccountError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setSession(data.session);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAccountError("");
+      if (!nextSession) setOwnerId("");
+    });
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    axios.post<Profile>(
+      `${API_URL}/auth/profile`,
+      {},
+      { headers: { Authorization: `Bearer ${session.access_token}` } },
+    )
+      .then(({ data }) => setOwnerId(String(data.id)))
+      .catch((error) => {
+        const detail = axios.isAxiosError(error) && error.response?.data?.detail;
+        setAccountError(typeof detail === "string" ? detail : "CareOS could not prepare this account.");
+      });
+  }, [session]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setOwnerId("");
+  }
+
+  if (session === undefined) return <AuthLoading />;
+  if (ownerId) {
+    return (
+      <OwnerContext.Provider value={ownerId}>
+        <CareOSApp onSignOut={signOut} />
+      </OwnerContext.Provider>
+    );
+  }
+  if (accountError) return <AuthSetupError detail={accountError} onSignOut={signOut} onDemo={() => { setAccountError(""); setOwnerId(DEMO_OWNER_ID); }} />;
+  if (session) return <AuthLoading />;
+  return <AuthScreen onDemo={() => setOwnerId(DEMO_OWNER_ID)} />;
+}
+
+function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
+  const OWNER_ID = useOwnerId();
   const [tab, setTab] = useState<Tab>("chat");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -210,7 +272,7 @@ export default function Home() {
       })
       .catch(() => setProfileError("Demo profile could not be loaded. Check the backend and Supabase connection."))
       .finally(() => setProfilesLoading(false));
-  }, []);
+  }, [OWNER_ID]);
 
   useEffect(() => {
     const scope = `${activeProfileId}:${preferredLanguage}`;
@@ -272,7 +334,7 @@ export default function Home() {
       controller.abort();
       greetingAudioRef.current?.pause();
     };
-  }, [activeProfileId, familyMemberId, preferredLanguage]);
+  }, [OWNER_ID, activeProfileId, familyMemberId, preferredLanguage]);
 
   useEffect(() => {
     const scope = `${activeProfileId}:${preferredLanguage}`;
@@ -296,7 +358,7 @@ export default function Home() {
         if (activeProfileScopeRef.current === activeProfileId) setDigestLoading(false);
       });
     return () => controller.abort();
-  }, [activeProfile.id, activeProfileId, familyMemberId, preferredLanguage]);
+  }, [OWNER_ID, activeProfile.id, activeProfileId, familyMemberId, preferredLanguage]);
 
   function setPreferredLanguage(language: PreferredLanguage) {
     window.localStorage.setItem("careos-language", language);
@@ -514,7 +576,7 @@ export default function Home() {
         <DesktopNavigation active={tab} onChange={setTab} />
 
         <section className="relative flex h-full min-w-0 flex-1 flex-col">
-          <Header tab={tab} activeProfile={activeProfile} />
+          <Header tab={tab} activeProfile={activeProfile} onSignOut={onSignOut} />
           {(profilesLoading || profileError) && (
             <ServiceNotice loading={profilesLoading} error={profileError} />
           )}
@@ -564,6 +626,130 @@ export default function Home() {
   );
 }
 
+function AuthLoading() {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[#f4f8f6] text-[#12664f]">
+      <div className="flex items-center gap-3 text-sm font-semibold">
+        <LoaderCircle className="animate-spin" size={20} />
+        Opening CareOS...
+      </div>
+    </main>
+  );
+}
+
+function AuthSetupError({ detail, onSignOut, onDemo }: { detail: string; onSignOut: () => Promise<void>; onDemo: () => void }) {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[#f4f8f6] px-4 text-[#17211d]">
+      <section className="w-full max-w-md rounded-md border border-[#e4c98c] bg-white p-6 shadow-lg">
+        <HeartPulse className="text-[#12664f]" />
+        <h1 className="mt-4 text-xl font-semibold">Account setup needs attention</h1>
+        <p className="mt-2 text-sm leading-6 text-[#687971]">{detail}</p>
+        <p className="mt-3 text-xs leading-5 text-[#687971]">Run the latest <code>supabase_schema_fix.sql</code> in Supabase, then sign in again.</p>
+        <div className="mt-5 flex gap-2">
+          <button type="button" onClick={() => void onSignOut()} className="h-10 flex-1 rounded-md bg-[#12664f] text-sm font-semibold text-white">Sign out</button>
+          <button type="button" onClick={onDemo} className="h-10 flex-1 rounded-md border border-[#12664f] text-sm font-semibold text-[#12664f]">Use demo</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AuthScreen({ onDemo }: { onDemo: () => void }) {
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!authConfigured) {
+      setError("Add the public Supabase URL and anon key to frontend/.env.local to enable accounts.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      if (mode === "signup") {
+        const { data, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { name: name.trim() } },
+        });
+        if (authError) throw authError;
+        if (!data.session) {
+          setNotice("Account created. Check your email to confirm it, then sign in.");
+          setMode("signin");
+        }
+      } else {
+        const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+        if (authError) throw authError;
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Authentication failed. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-dvh bg-[#f4f8f6] px-4 py-8 text-[#17211d]">
+      <div className="mx-auto grid min-h-[calc(100vh-64px)] max-w-5xl overflow-hidden rounded-lg border border-[#d9e5df] bg-white shadow-xl md:grid-cols-[1.05fr_0.95fr]">
+        <section className="flex flex-col justify-between bg-[#12664f] p-7 text-white sm:p-10">
+          <div className="flex items-center gap-3">
+            <span className="grid size-11 place-items-center rounded-md bg-white/15"><HeartPulse size={25} /></span>
+            <span className="text-xl font-semibold">CareOS</span>
+          </div>
+          <div className="my-12 max-w-md">
+            <h1 className="text-3xl font-semibold leading-tight sm:text-4xl">Your family&apos;s health context, remembered carefully.</h1>
+            <p className="mt-5 text-sm leading-6 text-white/75">Sign in to keep conversations, reports, medicines, and family profiles separated and available when you return.</p>
+          </div>
+          <p className="text-xs text-white/60">Emergency-first healthcare companion</p>
+        </section>
+
+        <section className="flex items-center p-6 sm:p-10">
+          <div className="w-full">
+            <div className="grid grid-cols-2 rounded-md border border-[#cfdad5] p-1">
+              {(["signin", "signup"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => { setMode(value); setError(""); setNotice(""); }}
+                  className={`h-10 rounded-md text-sm font-semibold ${mode === value ? "bg-[#12664f] text-white" : "text-[#53665d]"}`}
+                >
+                  {value === "signin" ? "Sign in" : "Create account"}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={submit} className="mt-7 space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">{mode === "signin" ? "Welcome back" : "Start your CareOS profile"}</h2>
+                <p className="mt-1 text-sm text-[#687971]">{mode === "signin" ? "Continue your private health workspace." : "Create a separate workspace for your health and family."}</p>
+              </div>
+              {mode === "signup" && <TextInput label="Full name" value={name} onChange={setName} required />}
+              <label className="block text-xs font-medium text-[#596b62]">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
+              <label className="block text-xs font-medium text-[#596b62]">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
+              {notice && <p className="rounded-md border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-xs leading-5 text-[#12664f]">{notice}</p>}
+              <ErrorText text={error} />
+              <button disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#12664f] text-sm font-semibold text-white disabled:opacity-50">
+                {busy && <LoaderCircle className="animate-spin" size={17} />}
+                {busy ? "Please wait..." : mode === "signin" ? "Sign in" : "Create account"}
+              </button>
+            </form>
+            <div className="my-6 flex items-center gap-3 text-xs text-[#87958e]"><span className="h-px flex-1 bg-[#dfe8e4]" />or<span className="h-px flex-1 bg-[#dfe8e4]" /></div>
+            <button type="button" onClick={onDemo} className="h-11 w-full rounded-md border border-[#12664f] text-sm font-semibold text-[#12664f] hover:bg-[#f1f8f5]">
+              Continue with Ramesh demo
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function DailyDigest({
   cards,
   loading,
@@ -606,7 +792,7 @@ function DailyDigest({
   );
 }
 
-function Header({ tab, activeProfile }: { tab: Tab; activeProfile: Profile }) {
+function Header({ tab, activeProfile, onSignOut }: { tab: Tab; activeProfile: Profile; onSignOut: () => Promise<void> }) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#f1f5f3] px-4 sm:px-6">
       <div className="flex items-center gap-3">
@@ -620,9 +806,18 @@ function Header({ tab, activeProfile }: { tab: Tab; activeProfile: Profile }) {
           </p>
         </div>
       </div>
-      <span className="max-w-[42%] truncate text-xs font-medium text-[#53665d]">
-        {activeProfile.name}
-      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="max-w-32 truncate text-xs font-medium text-[#53665d]">{activeProfile.name}</span>
+        <button
+          type="button"
+          onClick={() => void onSignOut()}
+          title="Sign out"
+          aria-label="Sign out"
+          className="grid size-9 shrink-0 place-items-center rounded-md text-[#53665d] hover:bg-[#edf4f1] hover:text-[#12664f]"
+        >
+          <LogOut size={17} />
+        </button>
+      </div>
     </header>
   );
 }
@@ -947,6 +1142,7 @@ function EmergencyOverlay({
 }
 
 function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
+  const OWNER_ID = useOwnerId();
   const [reports, setReports] = useState<Report[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -969,7 +1165,7 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
         if (!controller.signal.aborted) setInitialLoading(false);
       });
     return () => controller.abort();
-  }, [familyMemberId]);
+  }, [OWNER_ID, familyMemberId]);
 
   async function loadReports() {
     try {
@@ -1054,6 +1250,7 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
 }
 
 function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
+  const OWNER_ID = useOwnerId();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [form, setForm] = useState({ drug_name: "", dose: "", frequency: "", timing: "", with_food: false });
   const [interaction, setInteraction] = useState("");
@@ -1098,7 +1295,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
         if (!controller.signal.aborted) setInitialLoading(false);
       });
     return () => controller.abort();
-  }, [familyMemberId]);
+  }, [OWNER_ID, familyMemberId]);
 
   async function loadMedications() {
     try {
@@ -1220,6 +1417,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
 }
 
 function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }: { activeProfile: Profile; family: Profile[]; owner: Profile; onFamilyChange: (profiles: Profile[]) => void; onSelect: (profile: Profile) => void }) {
+  const OWNER_ID = useOwnerId();
   const [form, setForm] = useState({ name: "", relation: "", age: "", blood_group: "", known_conditions: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1282,6 +1480,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
 }
 
 function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMemberId?: string }) {
+  const OWNER_ID = useOwnerId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const historyScope = familyMemberId ?? OWNER_ID;
@@ -1301,7 +1500,7 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
         }
       });
     return () => controller.abort();
-  }, [familyMemberId, historyScope]);
+  }, [OWNER_ID, familyMemberId, historyScope]);
 
   async function downloadBrief() {
     setBusy(true);

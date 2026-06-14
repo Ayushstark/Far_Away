@@ -6,6 +6,7 @@ workflows.
 """
 
 from datetime import date
+import secrets
 from typing import Any
 
 from supabase import Client, create_client
@@ -35,6 +36,59 @@ def get_user(user_id: str) -> dict[str, Any] | None:
         .execute()
     )
     return response.data[0] if response.data else None
+
+
+def get_user_by_auth_id(auth_user_id: str) -> dict[str, Any] | None:
+    """Resolve a Supabase Auth identity to its isolated CareOS profile."""
+    response = (
+        get_client()
+        .table("users")
+        .select("*")
+        .eq("auth_user_id", auth_user_id)
+        .limit(1)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def create_authenticated_user(
+    auth_user_id: str,
+    name: str,
+    email: str,
+) -> dict[str, Any]:
+    """Create the CareOS profile paired with a newly authenticated account."""
+    existing = get_user_by_auth_id(auth_user_id)
+    if existing:
+        return existing
+
+    # The existing hackathon schema uses bigint profile IDs, while Supabase
+    # Auth uses UUIDs. A random positive bigint keeps both models compatible.
+    for _ in range(5):
+        profile_id = 10_000_000_000 + secrets.randbelow(9_000_000_000)
+        try:
+            response = (
+                get_client()
+                .table("users")
+                .insert(
+                    {
+                        "id": profile_id,
+                        "auth_user_id": auth_user_id,
+                        "name": name,
+                        "email": email,
+                        "known_conditions": [],
+                        "allergies": [],
+                    }
+                )
+                .execute()
+            )
+            return _first_row(response.data)
+        except Exception:
+            # A concurrent first login or the extremely unlikely ID collision
+            # can be resolved by checking the auth mapping before retrying.
+            existing = get_user_by_auth_id(auth_user_id)
+            if existing:
+                return existing
+    raise RuntimeError("Could not create a unique CareOS profile.")
 
 
 def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:

@@ -131,6 +131,10 @@ class TextToSpeechRequest(BaseModel):
     lang: Literal["en", "hi"] = "en"
 
 
+class AuthProfileRequest(BaseModel):
+    name: str = Field(default="", max_length=120)
+
+
 class FamilyMemberCreate(BaseModel):
     owner_id: str
     name: str
