@@ -684,7 +684,7 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!authConfigured) {
-      setError("Add the public Supabase URL and anon key to frontend/.env.local to enable accounts.");
+      setError("Supabase authentication is not configured for this deployment. Add the public URL and publishable key in Vercel Environment Variables, then redeploy.");
       return;
     }
     setBusy(true);

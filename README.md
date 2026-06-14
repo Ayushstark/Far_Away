@@ -169,13 +169,19 @@ SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_service_role_key
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 ```
 
 The backend must use the Supabase **service role** key. Never expose that key in
 the frontend or commit `.env`. Put the two `NEXT_PUBLIC_...` values in
 `frontend/.env.local`; the anon key is safe for browser authentication, but the
 service-role key is not.
+
+For Vercel, local `.env.local` files are not uploaded. Add
+`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` under **Project Settings → Environment
+Variables** for Production, Preview, and Development, then redeploy. CareOS
+also accepts the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name.
 
 Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
