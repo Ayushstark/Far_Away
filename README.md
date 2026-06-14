@@ -277,16 +277,6 @@ and TypeScript checks passing.
 - Loading, empty, progress, and error states across primary workflows
 - Backend API/database tests and frontend production verification
 
-## Work Required Next
-
-### Before a Public Demo
-
-- Deploy the FastAPI backend and configure `NEXT_PUBLIC_API_URL` in Vercel
-- Confirm the Supabase `reports` bucket permissions and upload workflow
-- Add one realistic sample PDF report to the demo assets
-- Test Gemini and Groq quotas from the deployed environment
-- Run the complete demo script on both mobile and desktop
-
 ### Before Real Users
 
 - Add Supabase Auth and remove the hard-coded demo user
