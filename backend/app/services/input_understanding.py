@@ -35,7 +35,7 @@ INTENT_TERMS: dict[IntentName, tuple[str, ...]] = {
     "symptom_analysis": (
         "pain", "hurt", "ache", "fever", "cough", "headache", "dizzy", "weak",
         "tired", "tingling", "nausea", "bleeding", "breathing", "stomach", "chest",
-        "injury", "symptom", "dard", "bukhar", "khansi", "chakkar", "kamzori",
+        "injury", "symptom", "anxiety", "panic", "attack", "dard", "bukhar", "khansi", "chakkar", "kamzori",
         "thakan", "jhanjhanahat", "ulti", "saans", "sir", "pet", "seena",
         "दर्द", "बुखार", "खांसी", "चक्कर", "कमजोरी", "सांस", "सिर", "पेट",
     ),
@@ -114,10 +114,21 @@ def extract_intent_fallback(message: str) -> IntentExtraction:
     )
 
 
-async def extract_intent(message: str) -> IntentExtraction:
+async def extract_intent(message: str, conversation_history: list[str] | None = None) -> IntentExtraction:
     fallback = extract_intent_fallback(message)
     if fallback.confidence >= 0.9:
         return fallback
+
+    recent_context = "\n".join((conversation_history or [])[-6:])
+    contextual = extract_intent_fallback(f"{recent_context}\n{message}") if recent_context else fallback
+    if fallback.primary_intent == "unclear" and contextual.is_healthcare:
+        return IntentExtraction(
+            contextual.primary_intent,
+            intents=contextual.intents,
+            normalized_query=message.strip(),
+            detected_language=fallback.detected_language,
+            confidence=0.9,
+        )
 
     result = await complete_json(
         (
@@ -126,7 +137,8 @@ async def extract_intent(message: str) -> IntentExtraction:
             "a symptom, medicine, report, or request that the user did not state."
         ),
         f"""
-User input: {message!r}
+Recent conversation: {recent_context or "None"}
+Latest user input: {message!r}
 
 Return one JSON object:
 {{
@@ -139,8 +151,8 @@ Return one JSON object:
 }}
 
 Use casual for greetings and ordinary conversation. Use unclear when meaning is
-not sufficiently clear. Only include healthcare intents explicitly supported by
-the user's words.
+not sufficiently clear. Use recent conversation to resolve pronouns and
+follow-up questions, but answer the latest input.
 """,
         {
             "primary_intent": fallback.primary_intent,

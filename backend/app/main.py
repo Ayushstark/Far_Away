@@ -95,7 +95,7 @@ async def authenticated_profile(
 async def chat(request: ChatRequest) -> ChatResponse:
     try:
         emergency = await assess_emergency(request.message)
-        extraction = await extract_intent(request.message)
+        extraction = await extract_intent(request.message, request.conversation_history)
         history = None
         medications = None
         if extraction.is_healthcare and not emergency.is_emergency:
@@ -116,6 +116,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             extraction=extraction,
             emergency_assessment=emergency,
             previous_assistant_message=request.previous_assistant_message,
+            conversation_history=request.conversation_history,
             follow_up_event_id=request.follow_up_event_id,
             memory_profile_id=(
                 f"{request.profile_id}:family:{request.family_member_id}"

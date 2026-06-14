@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
     family_member_id: str | None = Field(default=None, max_length=100)
     preferred_language: Literal["en", "hi"] = "en"
     previous_assistant_message: str | None = Field(default=None, max_length=10_000)
+    conversation_history: list[str] = Field(default_factory=list, max_length=12)
     follow_up_event_id: str | None = Field(default=None, max_length=100)
 
 

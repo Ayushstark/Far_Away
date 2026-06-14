@@ -126,6 +126,7 @@ class Orchestrator:
         extraction: IntentExtraction | None = None,
         emergency_assessment: EmergencyAssessment | None = None,
         previous_assistant_message: str | None = None,
+        conversation_history: list[str] | None = None,
         follow_up_event_id: str | None = None,
         memory_profile_id: str | None = None,
     ) -> ChatResponse:
@@ -206,7 +207,7 @@ class Orchestrator:
                 follow_up_outcome=outcome,
             )
 
-        understood = extraction or await extract_intent(message)
+        understood = extraction or await extract_intent(message, conversation_history)
         if understood.primary_intent == "language_request":
             return ChatResponse(
                 message="हाँ, बिल्कुल। मैं आपसे हिंदी में बात कर सकता हूँ। आप क्या जानना चाहते हैं?",
@@ -261,6 +262,8 @@ class Orchestrator:
             else message
         )
         routed_message += f"\n\nInterpreted user meaning: {understood.normalized_query}"
+        if conversation_history:
+            routed_message += "\n\nRecent conversation context:\n" + "\n".join(conversation_history[-6:])
         for intent in actionable:
             result = await self._run_intent(
                 intent,

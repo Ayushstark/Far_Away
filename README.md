@@ -38,6 +38,8 @@ hackathon MVP is ready for demonstration.**
 - Automatic CareOS voice replies and delayed hands-free voice-message sending
 - Supabase email/password sign-up, sign-in, persistent sessions, and sign-out
 - Verified Auth UUID to isolated CareOS profile mapping, with the Ramesh demo preserved
+- Profile-scoped persistent chat history with context-aware multi-message follow-ups
+- Consistent Lucide insight icons instead of provider-specific emoji shortcodes
 
 ### Build Progress
 

@@ -18,6 +18,7 @@ import {
   Plus,
   Phone,
   Pill,
+  TrendingUp,
   Volume2,
   VolumeX,
   Send,
@@ -36,6 +37,14 @@ const OwnerContext = createContext(DEMO_OWNER_ID);
 
 function useOwnerId() {
   return useContext(OwnerContext);
+}
+
+function loadChatMessages(key: string): ChatMessage[] {
+  try {
+    return JSON.parse(window.localStorage.getItem(key) ?? "[]");
+  } catch {
+    return [];
+  }
 }
 
 type Tab = "chat" | "reports" | "medications" | "family" | "profile";
@@ -234,7 +243,9 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [activeProfile, setActiveProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [ownerProfile, setOwnerProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [family, setFamily] = useState<Profile[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    loadChatMessages(`careos-chat:${OWNER_ID}:owner`),
+  );
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const greetingScopeRef = useRef<string | null>(null);
   const activeProfileScopeRef = useRef(OWNER_ID);
@@ -247,10 +258,15 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const conversationEnd = useRef<HTMLDivElement>(null);
   const activeProfileId = String(activeProfile.id);
   const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
+  const messageStorageKey = `careos-chat:${OWNER_ID}:${familyMemberId ?? "owner"}`;
 
   useEffect(() => {
     conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    window.localStorage.setItem(messageStorageKey, JSON.stringify(messages.slice(-30)));
+  }, [messageStorageKey, messages]);
 
   useEffect(() => {
     return () => {
@@ -293,7 +309,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
       .then(async ({ data }) => {
         if (greetingScopeRef.current !== scope) return;
         followUpEventIdRef.current = data.follow_up_event_id;
-        setMessages([{
+        setMessages((current) => current.length ? current : [{
           id: "proactive-greeting",
           speaker: "assistant" as const,
           text: data.greeting,
@@ -368,7 +384,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   function selectActiveProfile(profile: Profile) {
     cancelVoiceAutoSend();
     responseAudioRef.current?.pause();
-    setMessages([]);
+    const nextFamilyId = String(profile.id) === OWNER_ID ? "owner" : String(profile.id);
+    setMessages(loadChatMessages(`careos-chat:${OWNER_ID}:${nextFamilyId}`));
     setInsightCards([]);
     setDigestLoading(true);
     activeProfileScopeRef.current = String(profile.id);
@@ -427,6 +444,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
         family_member_id: familyMemberId,
         preferred_language: preferredLanguage,
         previous_assistant_message: [...messages].reverse().find((message) => message.speaker === "assistant")?.text,
+        conversation_history: messages.slice(-8).map((message) => `${message.speaker}: ${message.text}`),
         follow_up_event_id: followUpEventIdRef.current,
       });
       if (activeProfileScopeRef.current !== requestProfileScope) return;
@@ -767,6 +785,12 @@ function DailyDigest({
     followup_question: "border-[#ead39a] bg-[#fff8e7]",
     report_alert: "border-[#efc0b8] bg-[#fff2ef]",
   };
+  const icons = {
+    medication_reminder: Pill,
+    trend_positive: TrendingUp,
+    followup_question: MessageCircle,
+    report_alert: AlertTriangle,
+  };
   if (loading) {
     return <div className="h-20 animate-pulse rounded-md bg-[#eef3f0]" aria-label="Loading daily insights" />;
   }
@@ -776,17 +800,20 @@ function DailyDigest({
         {preferredLanguage === "hi" ? "आज की जानकारी" : "Today"}
       </p>
       <div className="flex snap-x gap-2 overflow-x-auto pb-2">
-        {cards.map((card, index) => (
+        {cards.map((card, index) => {
+          const Icon = icons[card.type];
+          return (
           <button
             key={`${card.type}-${index}`}
             type="button"
             onClick={() => onSelect(card.text)}
             className={`min-w-56 snap-start rounded-md border p-3 text-left text-sm leading-5 transition hover:-translate-y-0.5 ${styles[card.type]}`}
           >
-            <span className="mb-2 block text-lg" aria-hidden="true">{card.icon_emoji}</span>
+            <Icon className="mb-2 text-[#12664f]" size={19} aria-hidden="true" />
             {card.text}
           </button>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
