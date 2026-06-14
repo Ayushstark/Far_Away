@@ -286,7 +286,12 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
         setActiveProfile(profileResponse.data);
         setFamily(familyResponse.data);
       })
-      .catch(() => setProfileError("Demo profile could not be loaded. Check the backend and Supabase connection."))
+      .catch((error) => {
+        const detail = axios.isAxiosError(error) && error.response?.data?.detail;
+        setProfileError(typeof detail === "string"
+          ? `Profile could not be loaded: ${detail}`
+          : "Profile could not be loaded. Verify NEXT_PUBLIC_API_URL points to the CareOS FastAPI service.");
+      })
       .finally(() => setProfilesLoading(false));
   }, [OWNER_ID]);
 

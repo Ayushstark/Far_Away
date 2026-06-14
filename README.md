@@ -181,7 +181,9 @@ For Vercel, local `.env.local` files are not uploaded. Add
 `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` under **Project Settings → Environment
 Variables** for Production, Preview, and Development, then redeploy. CareOS
-also accepts the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name.
+also accepts the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name. Do not commit a
+`.env.production` file: it can silently force every Vercel build to use an old
+or unrelated backend URL.
 
 Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
