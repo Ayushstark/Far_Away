@@ -116,6 +116,17 @@ def test_get_profile_switches_to_selected_family_member(monkeypatch) -> None:
     assert ("family_members", "eq", "id", "family-1") in client.calls
 
 
+def test_create_authenticated_user_sets_required_profile_defaults(monkeypatch) -> None:
+    client = FakeClient({"users": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.create_authenticated_user("auth-1", "Avinash", "avi@example.com")
+
+    assert result["age"] == 0
+    assert 20_000_000 <= result["id"] < 1_920_000_000
+    assert ("users", "insert", result) in client.calls
+
+
 def test_get_recent_health_events_returns_structured_context(monkeypatch) -> None:
     rows = [{"id": "event-1", "description": "Headache", "resolved": False}]
     client = FakeClient({"health_events": rows})

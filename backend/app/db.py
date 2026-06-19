@@ -76,6 +76,9 @@ def create_authenticated_user(
                         "auth_user_id": auth_user_id,
                         "name": name,
                         "email": email,
+                        # Some live hackathon schemas still mark age as
+                        # NOT NULL, even though onboarding collects it later.
+                        "age": 0,
                         "known_conditions": [],
                         "allergies": [],
                     }
