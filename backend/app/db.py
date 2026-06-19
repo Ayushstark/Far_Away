@@ -6,6 +6,7 @@ workflows.
 """
 
 from datetime import date, datetime, timezone
+import re
 import secrets
 from typing import Any
 
@@ -14,6 +15,7 @@ from supabase import Client, create_client
 from backend.app.config import settings
 
 _client: Client | None = None
+MISSING_COLUMN = re.compile(r"Could not find the '([^']+)' column")
 
 
 def get_client() -> Client:
@@ -72,26 +74,20 @@ def create_authenticated_user(
     last_error: Exception | None = None
     for _ in range(20):
         profile_id = 20_000_000 + secrets.randbelow(1_900_000_000)
+        payload = {
+            "id": profile_id,
+            "auth_user_id": auth_user_id,
+            "name": name,
+            "email": email,
+            "age": age,
+            "gender": gender,
+            "blood_group": blood_group,
+            "known_conditions": _text_value(known_conditions),
+            "allergies": _text_value(allergies),
+            "emergency_contact": emergency_contact,
+        }
         try:
-            response = (
-                get_client()
-                .table("users")
-                .insert(
-                    {
-                        "id": profile_id,
-                        "auth_user_id": auth_user_id,
-                        "name": name,
-                        "email": email,
-                        "age": age,
-                        "gender": gender,
-                        "blood_group": blood_group,
-                        "known_conditions": _text_value(known_conditions),
-                        "allergies": _text_value(allergies),
-                        "emergency_contact": emergency_contact,
-                    }
-                )
-                .execute()
-            )
+            response = _insert_skipping_missing_columns("users", payload)
             return _first_row(response.data)
         except Exception as exc:
             # A concurrent first login or the extremely unlikely ID collision
@@ -101,6 +97,21 @@ def create_authenticated_user(
                 return existing
             last_error = exc
     raise RuntimeError(f"Could not create CareOS profile: {last_error}")
+
+
+def _insert_skipping_missing_columns(table: str, payload: dict[str, Any]) -> Any:
+    current = dict(payload)
+    while True:
+        try:
+            return get_client().table(table).insert(current).execute()
+        except Exception as exc:
+            match = MISSING_COLUMN.search(str(exc))
+            if not match:
+                raise
+            missing = match.group(1)
+            if missing not in current:
+                raise
+            current.pop(missing)
 
 
 def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:

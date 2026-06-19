@@ -37,4 +37,5 @@ alter table public.users
 -- Pair Supabase Auth accounts with the existing bigint CareOS user profiles.
 alter table public.users
   add column if not exists auth_user_id uuid unique references auth.users(id) on delete cascade,
-  add column if not exists email text;
+  add column if not exists email text,
+  add column if not exists emergency_contact text;
