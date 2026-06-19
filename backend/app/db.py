@@ -83,7 +83,7 @@ def create_authenticated_user(
                 .execute()
             )
             return _first_row(response.data)
-        except Exception:
+        except Exception as exc:
             # A concurrent first login or the extremely unlikely ID collision
             # can be resolved by checking the auth mapping before retrying.
             existing = get_user_by_auth_id(auth_user_id)
