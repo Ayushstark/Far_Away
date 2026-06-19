@@ -164,7 +164,7 @@ def test_add_medication_uses_final_supabase_schema(monkeypatch) -> None:
     )
 
     assert medication["drug_name"] == "Metformin"
-    assert medication["timing"] == ["8am", "8pm"]
+    assert medication["timing"] == "8am, 8pm"
     assert medication["with_food"] is True
     assert medication["is_active"] is True
 
@@ -192,7 +192,7 @@ def test_save_report_and_create_family_member(monkeypatch) -> None:
     assert report["flagged_values"] == {"HbA1c": "8.1%"}
     assert report["report_date"]
     assert family["owner_id"] == "user-1"
-    assert family["known_conditions"] == ["hypertension"]
+    assert family["known_conditions"] == "hypertension"
 
 
 def test_get_reports_returns_recent_family_reports(monkeypatch) -> None:

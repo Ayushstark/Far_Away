@@ -106,8 +106,8 @@ type Profile = {
   age?: number;
   gender?: string;
   blood_group?: string;
-  known_conditions?: string[];
-  allergies?: string[];
+  known_conditions?: string | string[];
+  allergies?: string | string[];
   emergency_contact?: string;
   emergency_contacts?: string | string[];
   relation?: string;
@@ -127,7 +127,7 @@ type Medication = {
   drug_name: string;
   dose: string;
   frequency: string;
-  timing?: string[];
+  timing?: string[] | string;
   with_food?: boolean;
 };
 
@@ -682,7 +682,15 @@ function AuthSetupError({ detail, onSignOut, onDemo }: { detail: string; onSignO
 
 function AuthScreen({ onDemo }: { onDemo: () => void }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [name, setName] = useState("");
+  const [signupForm, setSignupForm] = useState({
+    name: "",
+    age: "",
+    gender: "",
+    blood_group: "",
+    known_conditions: "",
+    allergies: "",
+    emergency_contact: "",
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -701,9 +709,15 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
     try {
       if (mode === "signup") {
         await axios.post(`${API_URL}/auth/signup`, {
-          name: name.trim(),
+          name: signupForm.name.trim(),
           email,
           password,
+          age: Number(signupForm.age),
+          gender: signupForm.gender.trim(),
+          blood_group: signupForm.blood_group.trim(),
+          known_conditions: signupForm.known_conditions.trim(),
+          allergies: signupForm.allergies.trim(),
+          emergency_contact: signupForm.emergency_contact.trim(),
         });
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
@@ -758,7 +772,17 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
                 <h2 className="text-xl font-semibold">{mode === "signin" ? "Welcome back" : "Start your CareOS profile"}</h2>
                 <p className="mt-1 text-sm text-[#687971]">{mode === "signin" ? "Continue your private health workspace." : "Create a separate workspace for your health and family."}</p>
               </div>
-              {mode === "signup" && <TextInput label="Full name" value={name} onChange={setName} required />}
+              {mode === "signup" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <TextInput label="Full name" value={signupForm.name} onChange={(value) => setSignupForm({ ...signupForm, name: value })} required />
+                  <TextInput label="Age" value={signupForm.age} onChange={(value) => setSignupForm({ ...signupForm, age: value })} required />
+                  <TextInput label="Gender" value={signupForm.gender} onChange={(value) => setSignupForm({ ...signupForm, gender: value })} required />
+                  <TextInput label="Blood group" value={signupForm.blood_group} onChange={(value) => setSignupForm({ ...signupForm, blood_group: value })} required />
+                  <TextInput label="Emergency contact" value={signupForm.emergency_contact} onChange={(value) => setSignupForm({ ...signupForm, emergency_contact: value })} required />
+                  <TextInput label="Known conditions" value={signupForm.known_conditions} onChange={(value) => setSignupForm({ ...signupForm, known_conditions: value })} />
+                  <TextInput label="Allergies" value={signupForm.allergies} onChange={(value) => setSignupForm({ ...signupForm, allergies: value })} />
+                </div>
+              )}
               <label className="block text-xs font-medium text-[#596b62]">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
               <label className="block text-xs font-medium text-[#596b62]">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
               {notice && <p className="rounded-md border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-xs leading-5 text-[#12664f]">{notice}</p>}
@@ -1305,7 +1329,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   useEffect(() => {
     if (!remindersEnabled || !("Notification" in window)) return;
     const timers = medications.flatMap((medication) =>
-      (medication.timing ?? []).map((timing) => {
+      textList(medication.timing).map((timing) => {
         const doseTime = nextDoseTime(timing);
         if (!doseTime) return undefined;
         return window.setTimeout(() => {
@@ -1424,8 +1448,8 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
             <Pill size={18} className="text-[#12664f]" />
             <p className="mt-3 text-sm font-semibold">{medication.drug_name}</p>
             <p className="mt-1 text-xs text-[#687971]">{medication.dose} | {medication.frequency}</p>
-            <p className="mt-2 text-xs text-[#687971]">{medication.timing?.join(", ") || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
-            <p className="mt-3 border-t border-[#e5ece8] pt-3 text-xs font-medium text-[#12664f]">{nextDoseLabel(medication.timing)}</p>
+            <p className="mt-2 text-xs text-[#687971]">{formatList(medication.timing) || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
+            <p className="mt-3 border-t border-[#e5ece8] pt-3 text-xs font-medium text-[#12664f]">{nextDoseLabel(textList(medication.timing))}</p>
           </article>
         ))}
       </div>
@@ -1497,7 +1521,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
             <UserRound size={19} className="text-[#12664f]" />
             <p className="mt-3 text-sm font-semibold">{profile.name}</p>
             <p className="mt-1 text-xs text-[#687971]">{String(profile.id) === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
-            <p className="mt-2 text-xs text-[#687971]">{profile.known_conditions?.join(", ") || "No known conditions"}</p>
+            <p className="mt-2 text-xs text-[#687971]">{formatList(profile.known_conditions) || "No known conditions"}</p>
           </button>
         ))}
       </div>
@@ -1569,8 +1593,8 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
         <ProfileField label="Blood group" value={profile.blood_group} />
         <ProfileField label="Emergency contact" value={profile.emergency_contact ?? formatList(profile.emergency_contacts)} />
       </div>
-      <ProfileField label="Known conditions" value={profile.known_conditions?.join(", ")} />
-      <ProfileField label="Allergies" value={profile.allergies?.join(", ")} />
+      <ProfileField label="Known conditions" value={formatList(profile.known_conditions)} />
+      <ProfileField label="Allergies" value={formatList(profile.allergies)} />
       <section className="rounded-md border border-[#dfe8e4] p-4">
         <p className="text-xs font-semibold uppercase text-[#71827a]">Health timeline</p>
         {historyLoading
@@ -1620,6 +1644,12 @@ function formatDate(value?: string) {
 
 function formatList(value?: string | string[]) {
   return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function textList(value?: string | string[]) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function nextDoseTime(timing: string) {

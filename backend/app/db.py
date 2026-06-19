@@ -5,7 +5,7 @@ final Supabase schema, while leaving orchestration code focused on healthcare
 workflows.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 import secrets
 from typing import Any
 
@@ -55,6 +55,12 @@ def create_authenticated_user(
     auth_user_id: str,
     name: str,
     email: str,
+    age: int = 0,
+    gender: str = "",
+    blood_group: str = "",
+    known_conditions: str | list[str] = "",
+    allergies: str | list[str] = "",
+    emergency_contact: str = "",
 ) -> dict[str, Any]:
     """Create the CareOS profile paired with a newly authenticated account."""
     existing = get_user_by_auth_id(auth_user_id)
@@ -76,11 +82,12 @@ def create_authenticated_user(
                         "auth_user_id": auth_user_id,
                         "name": name,
                         "email": email,
-                        # Some live hackathon schemas still mark age as
-                        # NOT NULL, even though onboarding collects it later.
-                        "age": 0,
-                        "known_conditions": [],
-                        "allergies": [],
+                        "age": age,
+                        "gender": gender,
+                        "blood_group": blood_group,
+                        "known_conditions": _text_value(known_conditions),
+                        "allergies": _text_value(allergies),
+                        "emergency_contact": emergency_contact,
                     }
                 )
                 .execute()
@@ -259,7 +266,7 @@ def add_medication(
     drug_name: str,
     dose: str,
     frequency: str,
-    timing: list[str],
+    timing: list[str] | str,
     with_food: bool,
     family_member_id: str | None = None,
 ) -> dict[str, Any]:
@@ -269,7 +276,7 @@ def add_medication(
         "drug_name": drug_name,
         "dose": dose,
         "frequency": frequency,
-        "timing": timing,
+        "timing": _text_value(timing),
         "with_food": with_food,
         "is_active": True,
     }
@@ -293,6 +300,7 @@ def save_report(
         "report_date": date.today().isoformat(),
         "ai_summary": ai_summary,
         "flagged_values": flagged_values,
+        "uploaded_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
     }
     response = get_client().table("reports").insert(payload).execute()
     return _first_row(response.data)
@@ -350,7 +358,7 @@ def create_family_member(
     relation: str,
     age: int,
     blood_group: str,
-    known_conditions: list[str],
+    known_conditions: list[str] | str,
 ) -> dict[str, Any]:
     payload = {
         "owner_id": owner_id,
@@ -358,7 +366,7 @@ def create_family_member(
         "relation": relation,
         "age": age,
         "blood_group": blood_group,
-        "known_conditions": known_conditions,
+        "known_conditions": _text_value(known_conditions),
     }
     response = get_client().table("family_members").insert(payload).execute()
     return _first_row(response.data)
@@ -404,6 +412,14 @@ def _scope_family_member(query: Any, family_member_id: str | None) -> Any:
     if family_member_id:
         return query.eq("family_member_id", family_member_id)
     return query.is_("family_member_id", "null")
+
+
+def _text_value(value: str | list[str] | tuple[str, ...] | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return ", ".join(str(item).strip() for item in value if str(item).strip())
 
 
 def _first_row(rows: list[dict[str, Any]] | None) -> dict[str, Any]:

@@ -98,6 +98,12 @@ async def authenticated_profile(
             auth_user_id=str(auth_user.id),
             name=name,
             email=auth_user.email or "",
+            age=int(metadata.get("age") or 0),
+            gender=str(metadata.get("gender") or ""),
+            blood_group=str(metadata.get("blood_group") or ""),
+            known_conditions=str(metadata.get("known_conditions") or ""),
+            allergies=str(metadata.get("allergies") or ""),
+            emergency_contact=str(metadata.get("emergency_contact") or ""),
         )
     except HTTPException:
         raise
@@ -118,7 +124,15 @@ async def service_role_signup(request: AuthSignupRequest) -> dict[str, str]:
                 "email": request.email.strip().lower(),
                 "password": request.password,
                 "email_confirm": True,
-                "user_metadata": {"name": request.name.strip()},
+                "user_metadata": {
+                    "name": request.name.strip(),
+                    "age": request.age,
+                    "gender": request.gender.strip(),
+                    "blood_group": request.blood_group.strip(),
+                    "known_conditions": request.known_conditions.strip(),
+                    "allergies": request.allergies.strip(),
+                    "emergency_contact": request.emergency_contact.strip(),
+                },
             }
         )
         auth_user = created.user
@@ -128,6 +142,12 @@ async def service_role_signup(request: AuthSignupRequest) -> dict[str, str]:
             auth_user_id=str(auth_user.id),
             name=request.name.strip(),
             email=auth_user.email or request.email.strip().lower(),
+            age=request.age,
+            gender=request.gender.strip(),
+            blood_group=request.blood_group.strip(),
+            known_conditions=request.known_conditions.strip(),
+            allergies=request.allergies.strip(),
+            emergency_contact=request.emergency_contact.strip(),
         )
         return {"status": "created"}
     except Exception as exc:

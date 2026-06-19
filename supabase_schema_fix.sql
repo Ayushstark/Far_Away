@@ -27,8 +27,12 @@ alter table public.health_events
 alter table public.medications
   alter column family_member_id drop not null;
 
+update public.users
+set age = 0
+where age is null;
+
 alter table public.users
-  alter column age drop not null;
+  alter column age set not null;
 
 -- Pair Supabase Auth accounts with the existing bigint CareOS user profiles.
 alter table public.users

@@ -140,6 +140,12 @@ class AuthSignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=6, max_length=200)
+    age: int = Field(ge=0, le=130)
+    gender: str = Field(min_length=1, max_length=40)
+    blood_group: str = Field(min_length=1, max_length=10)
+    known_conditions: str = Field(default="", max_length=500)
+    allergies: str = Field(default="", max_length=500)
+    emergency_contact: str = Field(default="", max_length=80)
 
 
 class FamilyMemberCreate(BaseModel):

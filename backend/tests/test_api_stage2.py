@@ -55,13 +55,24 @@ def test_auth_signup_creates_confirmed_user_and_profile(monkeypatch) -> None:
 
     response = client.post(
         "/auth/signup",
-        json={"name": "New User", "email": "NEW@example.com", "password": "secret12"},
+        json={
+            "name": "New User",
+            "email": "NEW@example.com",
+            "password": "secret12",
+            "age": 30,
+            "gender": "male",
+            "blood_group": "B+",
+            "known_conditions": "diabetes",
+            "allergies": "penicillin",
+            "emergency_contact": "+91 99999 99999",
+        },
     )
 
     assert response.status_code == 200
     assert response.json() == {"status": "created"}
     assert calls["attributes"]["email"] == "new@example.com"
     assert calls["attributes"]["email_confirm"] is True
+    assert calls["attributes"]["user_metadata"]["age"] == 30
     assert calls["profile"]["auth_user_id"] == "auth-user-2"
 
 
