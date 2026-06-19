@@ -10,6 +10,7 @@ from postgrest.exceptions import APIError
 
 DEMO_USER_ID = 9_000_001
 MISSING_COLUMN = re.compile(r"Could not find the '([^']+)' column")
+MALFORMED_ARRAY_LITERAL = re.compile(r"malformed array literal: \"([^\"]*)\"")
 
 
 def iso_days_ago(days: int, hour: int = 9) -> str:
@@ -25,15 +26,36 @@ def upsert_compatible(client: Any, table: str, rows: dict | list[dict]) -> None:
             client.table(table).upsert(payload, on_conflict="id").execute()
             return
         except APIError as exc:
-            match = MISSING_COLUMN.search(str(exc))
-            if not match:
-                raise
-            missing = match.group(1)
-            print(f"Skipping unavailable {table}.{missing} column.")
-            if isinstance(payload, list):
-                payload = [{key: value for key, value in row.items() if key != missing} for row in payload]
-            else:
-                payload = {key: value for key, value in payload.items() if key != missing}
+            message = str(exc)
+            missing_match = MISSING_COLUMN.search(message)
+            if missing_match:
+                missing = missing_match.group(1)
+                print(f"Skipping unavailable {table}.{missing} column.")
+                if isinstance(payload, list):
+                    payload = [{key: value for key, value in row.items() if key != missing} for row in payload]
+                else:
+                    payload = {key: value for key, value in payload.items() if key != missing}
+                continue
+
+            array_match = MALFORMED_ARRAY_LITERAL.search(message)
+            if array_match:
+                literal = array_match.group(1)
+                print(f"Converting scalar value to array for {table}: {literal}")
+                payload = convert_literal_to_array(payload, literal)
+                continue
+
+            raise
+
+
+def convert_literal_to_array(payload: dict | list[dict], literal: str) -> dict | list[dict]:
+    def convert_row(row: dict) -> dict:
+        converted = dict(row)
+        for key, value in row.items():
+            if value == literal:
+                converted[key] = [part.strip() for part in literal.split(",") if part.strip()]
+        return converted
+
+    return [convert_row(row) for row in payload] if isinstance(payload, list) else convert_row(payload)
 
 
 def seed() -> None:
