@@ -28,6 +28,7 @@ from backend.app.schemas import (
     IntentExtractionResponse,
     TextToSpeechRequest,
     AuthProfileRequest,
+    AuthSignupRequest,
     FamilyMemberCreate,
     MedicationCreate,
     HistoryResponse,
@@ -58,11 +59,20 @@ async def root() -> dict[str, str]:
 
 @app.get("/health")
 async def health() -> dict[str, str | bool]:
+    supabase_connected = False
+    if settings.supabase_url and settings.supabase_key:
+        try:
+            db.get_client().table("users").select("id").limit(1).execute()
+            supabase_connected = True
+        except Exception:
+            pass
     return {
         "status": "ok",
         "semantic_memory": orchestrator.memory.available,
         "gemini_configured": bool(settings.gemini_api_key),
         "groq_configured": bool(settings.groq_api_key),
+        "supabase_configured": bool(settings.supabase_url and settings.supabase_key),
+        "supabase_connected": supabase_connected,
     }
 
 
@@ -93,6 +103,38 @@ async def authenticated_profile(
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not load signed-in profile: {exc}") from exc
+
+
+@app.post("/auth/signup")
+async def service_role_signup(request: AuthSignupRequest) -> dict[str, str]:
+    """Create a confirmed Supabase Auth user without relying on SMTP delivery.
+
+    This hackathon flow keeps sign-up usable while the project does not yet have
+    a custom SMTP provider. The service-role key stays on the backend.
+    """
+    try:
+        created = db.get_client().auth.admin.create_user(
+            {
+                "email": request.email.strip().lower(),
+                "password": request.password,
+                "email_confirm": True,
+                "user_metadata": {"name": request.name.strip()},
+            }
+        )
+        auth_user = created.user
+        if not auth_user:
+            raise RuntimeError("Supabase did not return a created user.")
+        db.create_authenticated_user(
+            auth_user_id=str(auth_user.id),
+            name=request.name.strip(),
+            email=auth_user.email or request.email.strip().lower(),
+        )
+        return {"status": "created"}
+    except Exception as exc:
+        message = str(exc)
+        if "already" in message.lower() or "registered" in message.lower() or "exists" in message.lower():
+            raise HTTPException(status_code=409, detail="An account already exists for this email. Please sign in.") from exc
+        raise HTTPException(status_code=502, detail=f"Could not create account: {exc}") from exc
 
 
 @app.post("/chat", response_model=ChatResponse)

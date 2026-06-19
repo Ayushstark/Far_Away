@@ -700,22 +700,25 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
     setNotice("");
     try {
       if (mode === "signup") {
-        const { data, error: authError } = await supabase.auth.signUp({
+        await axios.post(`${API_URL}/auth/signup`, {
+          name: name.trim(),
           email,
           password,
-          options: { data: { name: name.trim() } },
         });
+        const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
-        if (!data.session) {
-          setNotice("Account created. Check your email to confirm it, then sign in.");
-          setMode("signin");
-        }
+        setNotice("Account created and signed in.");
       } else {
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
       }
     } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "Authentication failed. Please try again.");
+      const detail = axios.isAxiosError(authError) && authError.response?.data?.detail;
+      setError(typeof detail === "string"
+        ? detail
+        : authError instanceof Error
+          ? authError.message
+          : "Authentication failed. Please try again.");
     } finally {
       setBusy(false);
     }

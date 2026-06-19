@@ -189,6 +189,26 @@ The current hackathon deployment also includes browser-safe fallbacks for its
 public Supabase publishable credentials and Render API URL. Private service-role
 and AI provider keys remain backend-only.
 
+### Supabase Sign-Up And Verification Emails
+
+Running `supabase_schema_fix.sql` configures database columns; it does not
+configure Auth email delivery. Supabase's default SMTP only sends to addresses
+belonging to the project's organization team and has a very low rate limit.
+Configure **Authentication → Email → SMTP Settings** with a provider such as
+Resend, Brevo, or SendGrid for verification emails to reach normal users.
+
+For this hackathon build, CareOS avoids blocking sign-up on SMTP by using
+`POST /auth/signup` on the FastAPI backend. That route uses the backend-only
+Supabase service-role key to create a confirmed Auth user, creates the matching
+CareOS profile row, and then the frontend signs in with Supabase normally.
+Production should replace this with a reviewed email-verification or OAuth flow.
+
+Add the deployed frontend URL under **Authentication → URL Configuration** as
+the Site URL and an allowed Redirect URL. CareOS supplies this URL during signup
+and provides a resend-verification action that displays Supabase delivery
+errors. The backend `/health` response reports `supabase_connected` separately
+from the AI-provider status.
+
 Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
 `family_members`, `health_events`, `medications`, and `reports`.

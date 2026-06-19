@@ -41,6 +41,30 @@ def test_auth_profile_maps_verified_supabase_user(monkeypatch) -> None:
     assert response.json() == {"id": 12345, "name": "Asha", "email": "asha@example.com"}
 
 
+def test_auth_signup_creates_confirmed_user_and_profile(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+    created_user = SimpleNamespace(id="auth-user-2", email="new@example.com")
+
+    def create_user(attributes):
+        calls["attributes"] = attributes
+        return SimpleNamespace(user=created_user)
+
+    admin = SimpleNamespace(create_user=create_user)
+    monkeypatch.setattr(db, "get_client", lambda: SimpleNamespace(auth=SimpleNamespace(admin=admin)))
+    monkeypatch.setattr(db, "create_authenticated_user", lambda **kwargs: calls.setdefault("profile", kwargs))
+
+    response = client.post(
+        "/auth/signup",
+        json={"name": "New User", "email": "NEW@example.com", "password": "secret12"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "created"}
+    assert calls["attributes"]["email"] == "new@example.com"
+    assert calls["attributes"]["email_confirm"] is True
+    assert calls["profile"]["auth_user_id"] == "auth-user-2"
+
+
 def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
     calls: dict[str, object] = {}
     monkeypatch.setattr(db, "get_health_history", lambda *args: "Recent headache")

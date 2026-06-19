@@ -136,6 +136,12 @@ class AuthProfileRequest(BaseModel):
     name: str = Field(default="", max_length=120)
 
 
+class AuthSignupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=6, max_length=200)
+
+
 class FamilyMemberCreate(BaseModel):
     owner_id: str
     name: str
