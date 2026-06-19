@@ -123,8 +123,29 @@ def test_create_authenticated_user_sets_required_profile_defaults(monkeypatch) -
     result = db.create_authenticated_user("auth-1", "Avinash", "avi@example.com")
 
     assert result["age"] == 0
+    assert result["known_conditions"] == []
+    assert result["allergies"] == []
+    assert result["emergency_contacts"] == ""
     assert 20_000_000 <= result["id"] < 1_920_000_000
     assert ("users", "insert", result) in client.calls
+
+
+def test_create_authenticated_user_normalizes_live_array_columns(monkeypatch) -> None:
+    client = FakeClient({"users": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.create_authenticated_user(
+        "auth-2",
+        "Radha Desai",
+        "radha@example.com",
+        known_conditions="diabetes, hypertension",
+        allergies="None",
+        emergency_contact="6387442482",
+    )
+
+    assert result["known_conditions"] == ["diabetes", "hypertension"]
+    assert result["allergies"] == []
+    assert result["emergency_contacts"] == "6387442482"
 
 
 def test_get_recent_health_events_returns_structured_context(monkeypatch) -> None:
@@ -164,7 +185,7 @@ def test_add_medication_uses_final_supabase_schema(monkeypatch) -> None:
     )
 
     assert medication["drug_name"] == "Metformin"
-    assert medication["timing"] == "8am, 8pm"
+    assert medication["timing"] == ["8am", "8pm"]
     assert medication["with_food"] is True
     assert medication["is_active"] is True
 
@@ -192,7 +213,7 @@ def test_save_report_and_create_family_member(monkeypatch) -> None:
     assert report["flagged_values"] == {"HbA1c": "8.1%"}
     assert report["report_date"]
     assert family["owner_id"] == "user-1"
-    assert family["known_conditions"] == "hypertension"
+    assert family["known_conditions"] == ["hypertension"]
 
 
 def test_get_reports_returns_recent_family_reports(monkeypatch) -> None:

@@ -16,6 +16,12 @@ from backend.app.config import settings
 
 _client: Client | None = None
 MISSING_COLUMN = re.compile(r"Could not find the '([^']+)' column")
+MALFORMED_ARRAY_LITERAL = re.compile(r'malformed array literal: "([^"]*)"')
+TEXT_ARRAY_COLUMNS = {
+    "users": {"known_conditions", "allergies"},
+    "family_members": {"known_conditions"},
+    "medications": {"timing"},
+}
 
 
 def get_client() -> Client:
@@ -82,8 +88,9 @@ def create_authenticated_user(
             "age": age,
             "gender": gender,
             "blood_group": blood_group,
-            "known_conditions": _text_value(known_conditions),
-            "allergies": _text_value(allergies),
+            "known_conditions": _list_value(known_conditions),
+            "allergies": _list_value(allergies),
+            "emergency_contacts": emergency_contact,
             "emergency_contact": emergency_contact,
         }
         try:
@@ -105,13 +112,23 @@ def _insert_skipping_missing_columns(table: str, payload: dict[str, Any]) -> Any
         try:
             return get_client().table(table).insert(current).execute()
         except Exception as exc:
-            match = MISSING_COLUMN.search(str(exc))
-            if not match:
+            message = str(exc)
+            missing_match = MISSING_COLUMN.search(message)
+            if missing_match:
+                missing = missing_match.group(1)
+                if missing not in current:
+                    raise
+                current.pop(missing)
+                continue
+
+            array_match = MALFORMED_ARRAY_LITERAL.search(message)
+            if array_match and _retry_scalar_as_array(current, array_match.group(1)):
+                continue
+
+            if _retry_declared_arrays(table, current):
+                continue
+
                 raise
-            missing = match.group(1)
-            if missing not in current:
-                raise
-            current.pop(missing)
 
 
 def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:
@@ -287,11 +304,11 @@ def add_medication(
         "drug_name": drug_name,
         "dose": dose,
         "frequency": frequency,
-        "timing": _text_value(timing),
+        "timing": _list_value(timing),
         "with_food": with_food,
         "is_active": True,
     }
-    response = get_client().table("medications").insert(payload).execute()
+    response = _insert_skipping_missing_columns("medications", payload)
     return _first_row(response.data)
 
 
@@ -377,9 +394,9 @@ def create_family_member(
         "relation": relation,
         "age": age,
         "blood_group": blood_group,
-        "known_conditions": _text_value(known_conditions),
+        "known_conditions": _list_value(known_conditions),
     }
-    response = get_client().table("family_members").insert(payload).execute()
+    response = _insert_skipping_missing_columns("family_members", payload)
     return _first_row(response.data)
 
 
@@ -431,6 +448,36 @@ def _text_value(value: str | list[str] | tuple[str, ...] | None) -> str:
     if isinstance(value, str):
         return value
     return ", ".join(str(item).strip() for item in value if str(item).strip())
+
+
+def _list_value(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    """Normalize user-entered comma text for Supabase text[] columns."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",")]
+    else:
+        parts = [str(item).strip() for item in value]
+    empty_markers = {"", "none", "nothing", "nil", "no", "n/a", "na"}
+    return [part for part in parts if part.lower() not in empty_markers]
+
+
+def _retry_scalar_as_array(payload: dict[str, Any], literal: str) -> bool:
+    changed = False
+    for key, value in list(payload.items()):
+        if value == literal:
+            payload[key] = _list_value(value)
+            changed = True
+    return changed
+
+
+def _retry_declared_arrays(table: str, payload: dict[str, Any]) -> bool:
+    changed = False
+    for key in TEXT_ARRAY_COLUMNS.get(table, set()):
+        if key in payload and isinstance(payload[key], str):
+            payload[key] = _list_value(payload[key])
+            changed = True
+    return changed
 
 
 def _first_row(rows: list[dict[str, Any]] | None) -> dict[str, Any]:
