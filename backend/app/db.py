@@ -61,10 +61,11 @@ def create_authenticated_user(
     if existing:
         return existing
 
-    # The existing hackathon schema uses bigint profile IDs, while Supabase
-    # Auth uses UUIDs. A random positive bigint keeps both models compatible.
-    for _ in range(5):
-        profile_id = 10_000_000_000 + secrets.randbelow(9_000_000_000)
+    # The live hackathon schema has used both bigint and regular integer IDs.
+    # Stay below Postgres int4 max so authenticated profiles work on either.
+    last_error: Exception | None = None
+    for _ in range(20):
+        profile_id = 20_000_000 + secrets.randbelow(1_900_000_000)
         try:
             response = (
                 get_client()
@@ -88,7 +89,8 @@ def create_authenticated_user(
             existing = get_user_by_auth_id(auth_user_id)
             if existing:
                 return existing
-    raise RuntimeError("Could not create a unique CareOS profile.")
+            last_error = exc
+    raise RuntimeError(f"Could not create CareOS profile: {last_error}")
 
 
 def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:
