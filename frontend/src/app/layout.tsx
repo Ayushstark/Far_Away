@@ -4,6 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "CareOS Health",
   description: "A coordinated healthcare assistant",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/careos-icon.svg",
+    apple: "/careos-icon.svg",
+  },
 };
 
 export default function RootLayout({

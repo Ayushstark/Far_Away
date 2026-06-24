@@ -1,0 +1,20 @@
+{
+  "name": "CareOS Health Companion",
+  "short_name": "CareOS",
+  "description": "Emergency-first healthcare companion with family profiles, reports, medication reminders, and proactive care memory.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef5f1",
+  "theme_color": "#12664f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/careos-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["health", "medical", "productivity"]
+}

@@ -3,6 +3,8 @@
 import axios from "axios";
 import {
   AlertTriangle,
+  Activity,
+  BarChart3,
   Bell,
   BellRing,
   ChevronDown,
@@ -15,6 +17,7 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  Moon,
   Plus,
   Phone,
   Pill,
@@ -22,6 +25,8 @@ import {
   Volume2,
   VolumeX,
   Send,
+  Smartphone,
+  Sun,
   UploadCloud,
   UserRound,
   Users,
@@ -53,6 +58,7 @@ function loadChatMessages(key: string): ChatMessage[] {
 type Tab = "chat" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
 type PreferredLanguage = "en" | "hi";
+type ThemeMode = "light" | "dark";
 
 const LANGUAGE_EVENT = "careos-language-change";
 
@@ -71,6 +77,11 @@ function getLanguageSnapshot(): PreferredLanguage {
 
 function getServerLanguageSnapshot(): PreferredLanguage {
   return "en";
+}
+
+function getInitialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  return window.localStorage.getItem("careos-theme") === "dark" ? "dark" : "light";
 }
 
 type EmergencyDetails = {
@@ -177,6 +188,14 @@ export default function Home() {
   const [accountError, setAccountError] = useState("");
 
   useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {
+        // CareOS remains fully usable if the browser blocks service workers.
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     let active = true;
     supabase.auth.getSession().then(({ data }) => {
       if (active) setSession(data.session);
@@ -242,6 +261,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   );
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
+  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
   const [emergency, setEmergency] = useState<EmergencyDetails | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [ownerProfile, setOwnerProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
@@ -262,6 +282,15 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const activeProfileId = String(activeProfile.id);
   const familyMemberId = activeProfileId === OWNER_ID ? undefined : activeProfileId;
   const messageStorageKey = `careos-chat:${OWNER_ID}:${familyMemberId ?? "owner"}`;
+  const allProfiles = [ownerProfile, ...family];
+
+  function toggleTheme() {
+    setTheme((current) => {
+      const next = current === "dark" ? "light" : "dark";
+      window.localStorage.setItem("careos-theme", next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -597,12 +626,20 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   }
 
   return (
-    <main className="h-dvh bg-[#f8faf9] text-[#17211d]">
-      <div className="mx-auto flex h-screen max-w-7xl overflow-hidden bg-white md:my-4 md:h-[calc(100vh-32px)] md:rounded-2xl md:border md:border-[#dfe8e4] md:shadow-xl">
+    <main className={`h-dvh bg-[#eef5f1] text-[#17211d] md:bg-[radial-gradient(circle_at_top_left,#d9eee5_0,#eef5f1_32%,#f8fbfa_72%)] ${theme === "dark" ? "careos-dark" : ""}`}>
+      <div className="mx-auto flex h-screen max-w-7xl overflow-hidden bg-white shadow-2xl ring-1 ring-[#0b3d31]/10 md:my-4 md:h-[calc(100vh-32px)] md:rounded-2xl md:border md:border-[#b7cbc2]">
         <DesktopNavigation active={tab} onChange={setTab} />
 
-        <section className="relative flex h-full min-w-0 flex-1 flex-col">
-          <Header tab={tab} activeProfile={activeProfile} onSignOut={onSignOut} />
+        <section className="relative flex h-full min-w-0 flex-1 flex-col bg-[#fbfdfc]">
+          <Header
+            tab={tab}
+            activeProfile={activeProfile}
+            profiles={allProfiles}
+            theme={theme}
+            onProfileSelect={selectActiveProfile}
+            onThemeToggle={toggleTheme}
+            onSignOut={onSignOut}
+          />
           {(profilesLoading || profileError) && (
             <ServiceNotice loading={profilesLoading} error={profileError} />
           )}
@@ -642,6 +679,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
             <ProfileScreen profile={activeProfile} familyMemberId={familyMemberId} />
           )}
           <MobileNavigation active={tab} onChange={setTab} />
+          <AgentActivityPanel steps={thinkingSteps} loading={loading || greetingLoading} />
         </section>
       </div>
 
@@ -739,29 +777,30 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
   }
 
   return (
-    <main className="min-h-dvh bg-[#f4f8f6] px-4 py-8 text-[#17211d]">
-      <div className="mx-auto grid min-h-[calc(100vh-64px)] max-w-5xl overflow-hidden rounded-lg border border-[#d9e5df] bg-white shadow-xl md:grid-cols-[1.05fr_0.95fr]">
-        <section className="flex flex-col justify-between bg-[#12664f] p-7 text-white sm:p-10">
+    <main className="min-h-dvh bg-[#eef5f1] px-4 py-8 text-[#17211d] md:bg-[radial-gradient(circle_at_15%_15%,#d7eee4_0,#eef5f1_36%,#f8fbfa_76%)]">
+      <div className="mx-auto grid min-h-[calc(100vh-64px)] max-w-5xl overflow-hidden rounded-2xl border border-[#b7cbc2] bg-white shadow-2xl ring-1 ring-[#0b3d31]/10 md:grid-cols-[1.05fr_0.95fr]">
+        <section className="relative flex flex-col justify-between overflow-hidden bg-[#0f6b52] p-7 text-white sm:p-10">
+          <div className="absolute inset-x-0 top-0 h-32 bg-white/10" />
           <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-md bg-white/15"><HeartPulse size={25} /></span>
+            <span className="grid size-11 place-items-center rounded-xl border border-white/20 bg-white/15 shadow-lg"><HeartPulse size={25} /></span>
             <span className="text-xl font-semibold">CareOS</span>
           </div>
           <div className="my-12 max-w-md">
             <h1 className="text-3xl font-semibold leading-tight sm:text-4xl">Your family&apos;s health context, remembered carefully.</h1>
             <p className="mt-5 text-sm leading-6 text-white/75">Sign in to keep conversations, reports, medicines, and family profiles separated and available when you return.</p>
           </div>
-          <p className="text-xs text-white/60">Emergency-first healthcare companion</p>
+          <p className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-white/75">Emergency-first healthcare companion</p>
         </section>
 
-        <section className="flex items-center p-6 sm:p-10">
+        <section className="flex items-center bg-[#fbfdfc] p-6 sm:p-10">
           <div className="w-full">
-            <div className="grid grid-cols-2 rounded-md border border-[#cfdad5] p-1">
+            <div className="grid grid-cols-2 rounded-xl border border-[#b7cbc2] bg-white p-1 shadow-sm">
               {(["signin", "signup"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => { setMode(value); setError(""); setNotice(""); }}
-                  className={`h-10 rounded-md text-sm font-semibold ${mode === value ? "bg-[#12664f] text-white" : "text-[#53665d]"}`}
+                  className={`h-10 rounded-lg text-sm font-semibold transition ${mode === value ? "bg-[#12664f] text-white shadow-sm" : "text-[#53665d] hover:bg-[#eef7f3]"}`}
                 >
                   {value === "signin" ? "Sign in" : "Create account"}
                 </button>
@@ -783,17 +822,17 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
                   <TextInput label="Allergies" value={signupForm.allergies} onChange={(value) => setSignupForm({ ...signupForm, allergies: value })} />
                 </div>
               )}
-              <label className="block text-xs font-medium text-[#596b62]">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
-              <label className="block text-xs font-medium text-[#596b62]">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>
+              <label className="block text-xs font-medium text-[#596b62]">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#b7cbc2] bg-white px-3 text-sm shadow-sm outline-none transition focus:border-[#12664f] focus:ring-4 focus:ring-[#12664f]/10" /></label>
+              <label className="block text-xs font-medium text-[#596b62]">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#b7cbc2] bg-white px-3 text-sm shadow-sm outline-none transition focus:border-[#12664f] focus:ring-4 focus:ring-[#12664f]/10" /></label>
               {notice && <p className="rounded-md border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-xs leading-5 text-[#12664f]">{notice}</p>}
               <ErrorText text={error} />
-              <button disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#12664f] text-sm font-semibold text-white disabled:opacity-50">
+              <button disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#12664f] text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50">
                 {busy && <LoaderCircle className="animate-spin" size={17} />}
                 {busy ? "Please wait..." : mode === "signin" ? "Sign in" : "Create account"}
               </button>
             </form>
             <div className="my-6 flex items-center gap-3 text-xs text-[#87958e]"><span className="h-px flex-1 bg-[#dfe8e4]" />or<span className="h-px flex-1 bg-[#dfe8e4]" /></div>
-            <button type="button" onClick={onDemo} className="h-11 w-full rounded-md border border-[#12664f] text-sm font-semibold text-[#12664f] hover:bg-[#f1f8f5]">
+            <button type="button" onClick={onDemo} className="h-11 w-full rounded-lg border border-[#12664f] bg-white text-sm font-semibold text-[#12664f] shadow-sm transition hover:bg-[#f1f8f5]">
               Continue with Ramesh demo
             </button>
           </div>
@@ -827,14 +866,14 @@ function DailyDigest({
     report_alert: AlertTriangle,
   };
   if (loading) {
-    return <div className="h-20 animate-pulse rounded-md bg-[#eef3f0]" aria-label="Loading daily insights" />;
+    return <div className="h-24 animate-pulse rounded-xl border border-[#d9e7e1] bg-white shadow-sm" aria-label="Loading daily insights" />;
   }
   return (
     <section aria-label={preferredLanguage === "hi" ? "आज की स्वास्थ्य जानकारी" : "Today's health insights"}>
       <p className="mb-2 text-xs font-semibold uppercase text-[#60736a]">
         {preferredLanguage === "hi" ? "आज की जानकारी" : "Today"}
       </p>
-      <div className="flex snap-x gap-2 overflow-x-auto pb-2">
+      <div className="flex snap-x gap-3 overflow-x-auto pb-2">
         {cards.map((card, index) => {
           const Icon = icons[card.type];
           return (
@@ -842,7 +881,7 @@ function DailyDigest({
             key={`${card.type}-${index}`}
             type="button"
             onClick={() => onSelect(card.text)}
-            className={`min-w-56 snap-start rounded-md border p-3 text-left text-sm leading-5 transition hover:-translate-y-0.5 ${styles[card.type]}`}
+            className={`min-w-64 snap-start rounded-xl border p-4 text-left text-sm leading-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${styles[card.type]}`}
           >
             <Icon className="mb-2 text-[#12664f]" size={19} aria-hidden="true" />
             {card.text}
@@ -854,11 +893,27 @@ function DailyDigest({
   );
 }
 
-function Header({ tab, activeProfile, onSignOut }: { tab: Tab; activeProfile: Profile; onSignOut: () => Promise<void> }) {
+function Header({
+  tab,
+  activeProfile,
+  profiles,
+  theme,
+  onProfileSelect,
+  onThemeToggle,
+  onSignOut,
+}: {
+  tab: Tab;
+  activeProfile: Profile;
+  profiles: Profile[];
+  theme: ThemeMode;
+  onProfileSelect: (profile: Profile) => void;
+  onThemeToggle: () => void;
+  onSignOut: () => Promise<void>;
+}) {
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#f1f5f3] px-4 sm:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#d9e7e1] bg-white/90 px-4 shadow-sm backdrop-blur sm:px-6">
       <div className="flex items-center gap-3">
-        <span className="grid size-9 place-items-center rounded-md bg-[#12664f] text-white">
+        <span className="grid size-10 place-items-center rounded-xl bg-[#12664f] text-white shadow-sm ring-1 ring-[#0b3d31]/10">
           <HeartPulse size={20} />
         </span>
         <div>
@@ -869,13 +924,41 @@ function Header({ tab, activeProfile, onSignOut }: { tab: Tab; activeProfile: Pr
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="max-w-32 truncate text-xs font-medium text-[#53665d]">{activeProfile.name}</span>
+        <label className="sr-only" htmlFor="profile-switcher">Current profile</label>
+        <select
+          id="profile-switcher"
+          value={String(activeProfile.id)}
+          onChange={(event) => {
+            const selected = profiles.find((profile) => String(profile.id) === event.target.value);
+            if (selected) onProfileSelect(selected);
+          }}
+          className="max-w-40 rounded-full border border-[#d9e7e1] bg-[#f6faf8] px-3 py-1.5 text-xs font-semibold text-[#315448] shadow-sm outline-none transition focus:border-[#12664f] focus:ring-4 focus:ring-[#12664f]/10"
+        >
+          {profiles.map((profile) => (
+            <option key={profile.id} value={String(profile.id)}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onThemeToggle}
+          title={theme === "dark" ? "Use light mode" : "Use dark mode"}
+          aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"}
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-transparent text-[#53665d] transition hover:border-[#b7cbc2] hover:bg-[#edf4f1] hover:text-[#12664f]"
+        >
+          {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+        <span className="hidden items-center gap-1 rounded-full border border-[#d9e7e1] bg-[#f6faf8] px-2.5 py-1 text-[11px] font-semibold text-[#526b61] lg:flex">
+          <Smartphone size={13} />
+          PWA ready
+        </span>
         <button
           type="button"
           onClick={() => void onSignOut()}
           title="Sign out"
           aria-label="Sign out"
-          className="grid size-9 shrink-0 place-items-center rounded-md text-[#53665d] hover:bg-[#edf4f1] hover:text-[#12664f]"
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-transparent text-[#53665d] transition hover:border-[#b7cbc2] hover:bg-[#edf4f1] hover:text-[#12664f]"
         >
           <LogOut size={17} />
         </button>
@@ -923,7 +1006,7 @@ function ChatScreen({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-8">
+      <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,#fbfdfc_0%,#f5faf7_100%)] px-4 py-5 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           <div className="mb-2">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -933,13 +1016,13 @@ function ChatScreen({
                   {preferredLanguage === "hi" ? "CareOS हर संदेश में पहले आपात संकेतों की जाँच करता है।" : "CareOS checks every message for urgent warning signs first."}
                 </p>
               </div>
-              <div className="flex h-9 rounded-md border border-[#cfdad5] p-0.5" aria-label="Conversation language">
+              <div className="flex h-9 rounded-xl border border-[#b7cbc2] bg-white p-0.5 shadow-sm" aria-label="Conversation language">
                 {(["en", "hi"] as PreferredLanguage[]).map((language) => (
                   <button
                     key={language}
                     type="button"
                     onClick={() => onLanguage(language)}
-                    className={`min-w-14 rounded px-3 text-xs font-semibold ${preferredLanguage === language ? "bg-[#12664f] text-white" : "text-[#5e7168]"}`}
+                    className={`min-w-14 rounded-lg px-3 text-xs font-semibold transition ${preferredLanguage === language ? "bg-[#12664f] text-white shadow-sm" : "text-[#5e7168] hover:bg-[#eef7f3]"}`}
                   >
                     {language === "en" ? "English" : "हिंदी"}
                   </button>
@@ -966,8 +1049,8 @@ function ChatScreen({
         </div>
       </div>
 
-      <div className="shrink-0 bg-white px-4 pb-6 pt-2 sm:px-8">
-        <form onSubmit={onSend} className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-[#dfe8e4] bg-[#fcfdfe] p-2 shadow-sm transition-all focus-within:border-[#12664f] focus-within:ring-4 focus-within:ring-[#12664f]/5">
+      <div className="shrink-0 border-t border-[#d9e7e1] bg-white/95 px-4 pb-6 pt-3 shadow-[0_-10px_30px_rgba(18,102,79,0.06)] backdrop-blur sm:px-8">
+        <form onSubmit={onSend} className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-[#b7cbc2] bg-white p-2 shadow-lg shadow-[#0b3d31]/5 transition-all focus-within:border-[#12664f] focus-within:ring-4 focus-within:ring-[#12664f]/10">
           <button
             type="button"
             onClick={onVoice}
@@ -976,7 +1059,7 @@ function ChatScreen({
             className={`grid size-10 shrink-0 place-items-center rounded-xl transition ${
               listening
                 ? "animate-pulse bg-red-50 text-red-600"
-                : "text-[#566a60] hover:bg-gray-100"
+                : "text-[#566a60] hover:bg-[#eef7f3]"
             }`}
           >
             {listening ? <MicOff size={19} /> : <Mic size={19} />}
@@ -998,13 +1081,13 @@ function ChatScreen({
             disabled={!input.trim() || loading}
             aria-label="Send message"
             title="Send message"
-            className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#12664f] text-white transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-30"
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#12664f] text-white shadow-sm transition hover:bg-[#0e5743] disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Send size={18} />
           </button>
         </form>
         {voiceSendSeconds !== null && (
-          <div className="mx-auto mt-2 flex max-w-3xl items-center justify-between rounded-md bg-[#eef7f3] px-3 py-2 text-xs text-[#45665a]">
+          <div className="mx-auto mt-2 flex max-w-3xl items-center justify-between rounded-lg border border-[#c8ded4] bg-[#eef7f3] px-3 py-2 text-xs text-[#45665a] shadow-sm">
             <span>
               {preferredLanguage === "hi"
                 ? `आवाज़ संदेश ${voiceSendSeconds} सेकंड में भेजा जाएगा`
@@ -1077,12 +1160,12 @@ function MessageBubble({ message, preferredLanguage }: { message: ChatMessage; p
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`message-bubble-in max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-6 sm:max-w-[80%] ${
+        className={`message-bubble-in max-w-[88%] rounded-2xl px-5 py-3.5 text-sm leading-6 shadow-sm sm:max-w-[80%] ${
           isUser
-            ? "rounded-tr-none bg-[#12664f] text-white"
+            ? "rounded-tr-none bg-[#12664f] text-white shadow-[#12664f]/15"
             : isSystem
-              ? "border border-amber-100 bg-amber-50 text-amber-900"
-              : "rounded-tl-none bg-[#f1f5f3] text-[#24322c]"
+              ? "border border-amber-200 bg-amber-50 text-amber-900"
+              : "rounded-tl-none border border-[#d8e6df] bg-white text-[#24322c]"
         }`}
       >
         {!isUser && !isSystem && (
@@ -1094,7 +1177,7 @@ function MessageBubble({ message, preferredLanguage }: { message: ChatMessage; p
               disabled={generatingVoice}
               aria-label={generatingVoice ? "Generating voice output" : speaking ? "Stop voice output" : "Read response aloud"}
               title={generatingVoice ? "Generating voice output" : speaking ? "Stop voice output" : "Read response aloud"}
-              className="grid size-7 shrink-0 place-items-center rounded-lg text-[#597269] hover:bg-white/50"
+              className="grid size-7 shrink-0 place-items-center rounded-lg border border-transparent text-[#597269] transition hover:border-[#d8e6df] hover:bg-[#f3f8f5]"
             >
               {generatingVoice ? <LoaderCircle className="animate-spin" size={16} /> : speaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
@@ -1115,7 +1198,7 @@ function MessageBubble({ message, preferredLanguage }: { message: ChatMessage; p
 function TypingIndicator() {
   return (
     <div className="flex justify-start" aria-label="CareOS is typing">
-      <div className="flex h-10 items-center gap-1 rounded-2xl bg-[#f1f5f3] px-5">
+      <div className="flex h-10 items-center gap-1 rounded-2xl border border-[#d8e6df] bg-white px-5 shadow-sm">
         {[0, 1, 2].map((dot) => (
           <span
             key={dot}
@@ -1155,6 +1238,32 @@ function ThinkingTrail({
         );
       })}
     </div>
+  );
+}
+
+function AgentActivityPanel({ steps, loading }: { steps: string[]; loading: boolean }) {
+  const visibleSteps = steps.length ? steps : loading ? ["Checking urgency", "Reading profile context", "Preparing response"] : [];
+  if (!visibleSteps.length) return null;
+  return (
+    <aside className="pointer-events-none absolute right-5 top-24 z-10 hidden w-72 rounded-2xl border border-[#c8ded4] bg-white/95 p-4 shadow-xl shadow-[#0b3d31]/10 backdrop-blur lg:block">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="grid size-8 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]">
+          <Activity size={17} />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-[#18352a]">Agent thinking</p>
+          <p className="text-[11px] text-[#6c7e76]">Live CareOS routing trail</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {visibleSteps.slice(-4).map((step, index) => (
+          <div key={`${step}-${index}`} className="thinking-step flex items-center gap-2 rounded-lg border border-[#e1ece7] bg-[#f8fbfa] px-3 py-2 text-xs text-[#405c51]">
+            {index === visibleSteps.length - 1 && loading ? <LoaderCircle className="animate-spin text-[#12664f]" size={14} /> : <HeartPulse className="text-[#12664f]" size={14} />}
+            <span>{step}{step === "Done" ? "" : "..."}</span>
+          </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -1283,16 +1392,17 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
           event.preventDefault();
           upload(event.dataTransfer.files[0]);
         }}
-        className="flex min-h-36 w-full flex-col items-center justify-center rounded-md border border-dashed border-[#9eb9ad] bg-[#f4f8f6] px-5 text-center hover:border-[#12664f]"
+        className="flex min-h-40 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#9eb9ad] bg-white px-5 text-center shadow-sm transition hover:border-[#12664f] hover:bg-[#f3faf6] hover:shadow-md"
       >
         {busy ? <LoaderCircle className="animate-spin text-[#12664f]" /> : <UploadCloud className="text-[#12664f]" />}
         <span className="mt-3 text-sm font-semibold">{busy ? "Analyzing report..." : "Drop a PDF here or browse"}</span>
         <span className="mt-1 text-xs text-[#71827a]">Gemini reads the original PDF and saves its summary.</span>
       </button>
       <ErrorText text={error} />
+      {!initialLoading && reports.length > 0 && <ReportInsights reports={reports} />}
       <div className="space-y-3">
         {reports.map((report) => (
-          <article key={report.id} className="rounded-md border border-[#dfe8e4] p-4">
+          <article key={report.id} className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm transition hover:border-[#b7cbc2] hover:shadow-md">
             <button className="flex w-full items-start justify-between gap-3 text-left" onClick={() => setExpanded(expanded === report.id ? null : report.id)}>
               <div>
                 <p className="text-sm font-semibold">{report.report_type}</p>
@@ -1301,13 +1411,65 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
               </div>
               {expanded === report.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
             </button>
-            {expanded === report.id && <p className="mt-4 whitespace-pre-wrap border-t border-[#e5ece8] pt-4 text-sm leading-6">{report.ai_summary}</p>}
+            {expanded === report.id && <p className="mt-4 whitespace-pre-wrap rounded-lg border border-[#e5ece8] bg-[#fbfdfc] p-4 text-sm leading-6">{report.ai_summary}</p>}
           </article>
         ))}
         {initialLoading && <LoadingState text="Loading reports..." />}
         {!initialLoading && !reports.length && !error && <EmptyState text="No reports uploaded yet." />}
       </div>
     </ScreenShell>
+  );
+}
+
+function ReportInsights({ reports }: { reports: Report[] }) {
+  const recent = [...reports].slice(0, 4);
+  const totalFlags = recent.reduce((sum, report) => sum + Object.keys(report.flagged_values ?? {}).length, 0);
+  const latest = recent[0];
+  return (
+    <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#71827a]">Report dashboard</p>
+          <h2 className="mt-1 text-base font-semibold text-[#18352a]">{recent.length} recent reports reviewed</h2>
+        </div>
+        <span className="grid size-10 place-items-center rounded-xl bg-[#eef7f3] text-[#12664f]">
+          <BarChart3 size={20} />
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <MetricTile label="Latest report" value={latest ? formatDate(latest.report_date ?? latest.uploaded_at) : "None"} />
+        <MetricTile label="Flagged values" value={String(totalFlags)} tone={totalFlags ? "warn" : "good"} />
+        <MetricTile label="CareOS status" value={totalFlags ? "Review" : "Stable"} tone={totalFlags ? "warn" : "good"} />
+      </div>
+      <div className="mt-4 space-y-2">
+        {recent.map((report, index) => {
+          const flagged = Object.keys(report.flagged_values ?? {}).length;
+          const width = `${Math.max(10, Math.min(100, flagged * 28 + 12))}%`;
+          return (
+            <div key={report.id} className="grid grid-cols-[5.5rem_1fr_2rem] items-center gap-2 text-xs">
+              <span className="truncate text-[#687971]">{formatDate(report.report_date ?? report.uploaded_at)}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-[#edf4f1]">
+                <span
+                  className={`block h-full rounded-full ${flagged ? "bg-[#d8843d]" : "bg-[#12664f]"}`}
+                  style={{ width: index === 0 && !flagged ? "35%" : width }}
+                />
+              </span>
+              <span className="text-right font-semibold text-[#315448]">{flagged}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MetricTile({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "good" | "warn" }) {
+  const toneClass = tone === "good" ? "text-[#12664f]" : tone === "warn" ? "text-[#9b5a16]" : "text-[#18352a]";
+  return (
+    <div className="rounded-xl border border-[#e1ece7] bg-[#f8fbfa] p-3">
+      <p className="text-[11px] font-medium text-[#71827a]">{label}</p>
+      <p className={`mt-1 text-sm font-semibold ${toneClass}`}>{value}</p>
+    </div>
   );
 }
 
@@ -1432,30 +1594,30 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
 
   return (
     <ScreenShell title="Active medications" description="Track doses, timing, and possible interactions.">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#dfe8e4] bg-[#f4f8f6] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#c8ded4] bg-[#eef7f3] p-4 shadow-sm">
         <div>
           <p className="text-sm font-semibold">Medication reminders</p>
           <p className="mt-1 text-xs text-[#687971]">{remindersEnabled ? "Browser reminders are active while CareOS is open." : "Enable alerts for upcoming active-medication doses."}</p>
         </div>
-        <button type="button" onClick={enableReminders} className="flex h-10 items-center gap-2 rounded-md border border-[#12664f] px-4 text-sm font-semibold text-[#12664f]">
+        <button type="button" onClick={enableReminders} className="flex h-10 items-center gap-2 rounded-lg border border-[#12664f] bg-white px-4 text-sm font-semibold text-[#12664f] shadow-sm transition hover:bg-[#f7fbf9]">
           {remindersEnabled ? <BellRing size={17} /> : <Bell size={17} />}
           {remindersEnabled ? "Reminders active" : "Enable reminders"}
         </button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {medications.map((medication) => (
-          <article key={medication.id} className="rounded-md border border-[#dfe8e4] p-4">
-            <Pill size={18} className="text-[#12664f]" />
+          <article key={medication.id} className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm transition hover:border-[#b7cbc2] hover:shadow-md">
+            <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><Pill size={18} /></span>
             <p className="mt-3 text-sm font-semibold">{medication.drug_name}</p>
             <p className="mt-1 text-xs text-[#687971]">{medication.dose} | {medication.frequency}</p>
             <p className="mt-2 text-xs text-[#687971]">{formatList(medication.timing) || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
-            <p className="mt-3 border-t border-[#e5ece8] pt-3 text-xs font-medium text-[#12664f]">{nextDoseLabel(textList(medication.timing))}</p>
+            <p className="mt-3 rounded-lg border border-[#d7e8df] bg-[#f7fbf9] px-3 py-2 text-xs font-semibold text-[#12664f]">{nextDoseLabel(textList(medication.timing))}</p>
           </article>
         ))}
       </div>
       {initialLoading && <LoadingState text="Loading medications..." />}
       {!initialLoading && !medications.length && !error && <EmptyState text="No active medications." />}
-      <form onSubmit={addMedication} className="space-y-3 border-t border-[#dfe8e4] pt-5">
+      <form onSubmit={addMedication} className="space-y-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">Add medication</h2>
         <div className="grid gap-3 sm:grid-cols-2">
           <TextInput label="Drug name" value={form.drug_name} onChange={(value) => setForm({ ...form, drug_name: value })} required />
@@ -1470,8 +1632,8 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
         {interaction && <p className="rounded-md border border-[#e0b562] bg-[#fff8e8] p-3 text-xs leading-5 text-[#6f5015]">{interaction}</p>}
         <ErrorText text={error} />
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={checkInteractions} disabled={busy || !form.drug_name} className="h-10 rounded-md border border-[#12664f] px-4 text-sm font-semibold text-[#12664f] disabled:opacity-40">{busy ? "Checking..." : "Check interactions"}</button>
-          <button disabled={busy} className="h-10 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white disabled:opacity-40">{busy ? "Working..." : "Add medication"}</button>
+          <button type="button" onClick={checkInteractions} disabled={busy || !form.drug_name} className="h-10 rounded-lg border border-[#12664f] bg-white px-4 text-sm font-semibold text-[#12664f] shadow-sm transition hover:bg-[#f7fbf9] disabled:opacity-40">{busy ? "Checking..." : "Check interactions"}</button>
+          <button disabled={busy} className="h-10 rounded-lg bg-[#12664f] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-40">{busy ? "Working..." : "Add medication"}</button>
         </div>
       </form>
     </ScreenShell>
@@ -1508,7 +1670,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
 
   return (
     <ScreenShell title="Family profiles" description="Switch profiles to manage care for dependents.">
-      <div className="rounded-md border border-[#b8d8ca] bg-[#f1f8f5] p-4">
+      <div className="rounded-xl border border-[#b8d8ca] bg-[#eef7f3] p-4 shadow-sm">
         <p className="text-xs font-semibold uppercase text-[#527166]">Currently viewing</p>
         <p className="mt-1 text-base font-semibold text-[#12664f]">{activeProfile.name}</p>
         <p className="mt-1 text-xs leading-5 text-[#60736a]">
@@ -1517,15 +1679,15 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {[owner, ...family].map((profile) => (
-          <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-md border p-4 text-left ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] bg-[#f1f8f5]" : "border-[#dfe8e4]"}`}>
-            <UserRound size={19} className="text-[#12664f]" />
+          <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] ring-4 ring-[#12664f]/10" : "border-[#d2e1da]"}`}>
+            <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><UserRound size={19} /></span>
             <p className="mt-3 text-sm font-semibold">{profile.name}</p>
             <p className="mt-1 text-xs text-[#687971]">{String(profile.id) === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
             <p className="mt-2 text-xs text-[#687971]">{formatList(profile.known_conditions) || "No known conditions"}</p>
           </button>
         ))}
       </div>
-      <form onSubmit={addMember} className="space-y-3 border-t border-[#dfe8e4] pt-5">
+      <form onSubmit={addMember} className="space-y-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">Add family member</h2>
         <div className="grid gap-3 sm:grid-cols-2">
           <TextInput label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
@@ -1535,7 +1697,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
         </div>
         <TextInput label="Known conditions, comma separated" value={form.known_conditions} onChange={(value) => setForm({ ...form, known_conditions: value })} />
         <ErrorText text={error} />
-        <button disabled={busy} className="flex h-10 items-center gap-2 rounded-md bg-[#12664f] px-4 text-sm font-semibold text-white disabled:opacity-50">{busy ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />} {busy ? "Adding..." : "Add family member"}</button>
+        <button disabled={busy} className="flex h-10 items-center gap-2 rounded-lg bg-[#12664f] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50">{busy ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />} {busy ? "Adding..." : "Add family member"}</button>
       </form>
     </ScreenShell>
   );
@@ -1595,14 +1757,14 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
       </div>
       <ProfileField label="Known conditions" value={formatList(profile.known_conditions)} />
       <ProfileField label="Allergies" value={formatList(profile.allergies)} />
-      <section className="rounded-md border border-[#dfe8e4] p-4">
+      <section className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <p className="text-xs font-semibold uppercase text-[#71827a]">Health timeline</p>
         {historyLoading
           ? <p className="mt-3 text-sm text-[#687971]">Loading health details...</p>
           : <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#35463e]">{historyState.text}</p>}
       </section>
       <ErrorText text={error} />
-      <button onClick={downloadBrief} disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#12664f] text-sm font-semibold text-white disabled:opacity-50 sm:w-auto sm:px-5">
+      <button onClick={downloadBrief} disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#12664f] text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50 sm:w-auto sm:px-5">
         {busy ? <LoaderCircle className="animate-spin" size={18} /> : <Download size={18} />}
         Generate doctor brief
       </button>
@@ -1611,31 +1773,43 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
 }
 
 function ScreenShell({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return <div className="flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-8 md:pb-8"><div className="mx-auto max-w-3xl space-y-5"><div><h1 className="text-xl font-semibold">{title}</h1><p className="mt-1 text-sm text-[#687971]">{description}</p></div>{children}</div></div>;
+  return <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,#fbfdfc_0%,#f5faf7_100%)] px-4 py-5 pb-24 sm:px-8 md:pb-8"><div className="mx-auto max-w-3xl space-y-5"><div className="rounded-2xl border border-[#d2e1da] bg-white p-5 shadow-sm"><h1 className="text-xl font-semibold text-[#10261e]">{title}</h1><p className="mt-1 text-sm text-[#687971]">{description}</p></div>{children}</div></div>;
 }
 
 function TextInput({ label, value, onChange, required = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }) {
-  return <label className="block text-xs font-medium text-[#596b62]">{label}<input required={required} value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-[#cfdad5] px-3 text-sm outline-none focus:border-[#12664f]" /></label>;
+  return <label className="block text-xs font-medium text-[#596b62]">{label}<input required={required} value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#b7cbc2] bg-white px-3 text-sm shadow-sm outline-none transition focus:border-[#12664f] focus:ring-4 focus:ring-[#12664f]/10" /></label>;
 }
 
 function ProfileField({ label, value }: { label: string; value: unknown }) {
-  return <div className="rounded-md border border-[#dfe8e4] p-4"><p className="text-xs font-medium text-[#71827a]">{label}</p><p className="mt-2 text-sm">{String(value || "Not provided")}</p></div>;
+  return <div className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm"><p className="text-xs font-medium text-[#71827a]">{label}</p><p className="mt-2 text-sm font-medium text-[#24322c]">{String(value || "Not provided")}</p></div>;
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <p className="rounded-md border border-dashed border-[#cfdad5] px-4 py-8 text-center text-sm text-[#71827a]">{text}</p>;
+  return <p className="rounded-xl border border-dashed border-[#b7cbc2] bg-white px-4 py-8 text-center text-sm text-[#71827a] shadow-sm">{text}</p>;
 }
 
 function LoadingState({ text }: { text: string }) {
-  return <p className="flex items-center justify-center gap-2 rounded-md border border-[#dfe8e4] px-4 py-8 text-sm text-[#71827a]"><LoaderCircle className="animate-spin" size={17} />{text}</p>;
+  return (
+    <div className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm" aria-label={text}>
+      <div className="mb-4 flex items-center gap-2 text-xs font-semibold text-[#71827a]">
+        <LoaderCircle className="animate-spin" size={15} />
+        {text}
+      </div>
+      <div className="space-y-3">
+        {[0, 1, 2].map((row) => (
+          <div key={row} className="skeleton-line h-12 rounded-lg" />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ErrorText({ text }: { text: string }) {
-  return text ? <p className="rounded-md border border-[#efb2a8] bg-[#fff2ef] p-3 text-xs text-[#982d1d]">{text}</p> : null;
+  return text ? <p className="rounded-lg border border-[#efb2a8] bg-[#fff2ef] p-3 text-xs leading-5 text-[#982d1d] shadow-sm">{text}</p> : null;
 }
 
 function ServiceNotice({ loading, error }: { loading: boolean; error: string }) {
-  return <div className={`mx-4 mt-3 rounded-md border px-3 py-2 text-xs sm:mx-6 ${error ? "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]" : "border-[#b8d8ca] bg-[#f1f8f5] text-[#43675a]"}`}>{loading ? "Loading CareOS demo profile..." : error}</div>;
+  return <div className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs shadow-sm sm:mx-6 ${error ? "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]" : "border-[#b8d8ca] bg-[#f1f8f5] text-[#43675a]"}`}>{loading ? "Loading CareOS demo profile..." : error}</div>;
 }
 
 function formatDate(value?: string) {
@@ -1686,9 +1860,9 @@ function nextDoseLabel(timings?: string[]) {
 
 function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <aside className="hidden h-full w-64 shrink-0 overflow-y-auto border-r border-[#f1f5f3] bg-white p-6 md:block">
-      <div className="mb-8 flex items-center gap-2 px-2 font-bold text-[#12664f]">
-        <HeartPulse size={22} />
+    <aside className="hidden h-full w-64 shrink-0 overflow-y-auto border-r border-[#d9e7e1] bg-[#f8fbfa] p-6 md:block">
+      <div className="mb-8 flex items-center gap-3 rounded-2xl border border-[#d2e1da] bg-white px-3 py-3 font-bold text-[#12664f] shadow-sm">
+        <span className="grid size-9 place-items-center rounded-xl bg-[#12664f] text-white"><HeartPulse size={20} /></span>
         <span className="text-lg">CareOS</span>
       </div>
       <nav className="space-y-1.5">
@@ -1696,8 +1870,8 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`flex h-11 w-full items-center gap-3 rounded-xl px-4 text-sm font-medium transition-all ${
-              active === id ? "bg-[#f1f8f5] text-[#12664f]" : "text-[#596b62] hover:bg-gray-50"
+            className={`flex h-11 w-full items-center gap-3 rounded-xl border px-4 text-sm font-medium transition-all ${
+              active === id ? "border-[#b8d8ca] bg-white text-[#12664f] shadow-sm" : "border-transparent text-[#596b62] hover:border-[#d9e7e1] hover:bg-white"
             }`}
           >
             <Icon size={18} />
@@ -1711,13 +1885,13 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
 
 function MobileNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-5 border-t border-[#dfe8e4] bg-white px-1 pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-5 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
       {navigation.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
           onClick={() => onChange(id)}
-          className={`flex min-w-0 flex-col items-center justify-center gap-1 text-[10px] font-medium ${
-            active === id ? "text-[#12664f]" : "text-[#71827a]"
+          className={`flex min-w-0 flex-col items-center justify-center gap-1 text-[10px] font-medium transition ${
+            active === id ? "text-[#12664f]" : "text-[#71827a] hover:text-[#315448]"
           }`}
         >
           <Icon size={19} strokeWidth={active === id ? 2.5 : 2} />

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CareOS">
+  <rect width="512" height="512" rx="112" fill="#12664f"/>
+  <path d="M256 352c-72-50-120-90-120-148 0-38 27-68 64-68 23 0 43 12 56 31 13-19 33-31 56-31 37 0 64 30 64 68 0 58-48 98-120 148z" fill="none" stroke="#ffffff" stroke-width="28" stroke-linejoin="round"/>
+  <path d="M151 248h58l20-41 41 94 28-53h63" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
