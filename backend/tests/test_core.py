@@ -325,6 +325,16 @@ def test_empty_family_digest_never_invents_health_claims(monkeypatch) -> None:
 
     cards = asyncio.run(care_coordinator.generate_daily_digest("user-1", "family-1"))
 
+    assert [card["type"] for card in cards] == [
+        "health_concern",
+        "care_steps",
+        "quick_summary",
+    ]
+    assert cards[0]["text"] == "Latest concern: No major new concern from available data."
+    assert "Avoid:" in cards[1]["text"]
+    assert "Quick summary:" in cards[2]["text"]
+    return
+
     assert cards == [{
         "type": "trend_positive",
         "icon_emoji": "✓",

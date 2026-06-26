@@ -137,6 +137,98 @@ def _daily_digest_fallback(
     }]
 
 
+async def generate_daily_digest(
+    user_id: str,
+    family_member_id: str | None = None,
+    preferred_language: str = "en",
+) -> list[dict]:
+    """Return the three homepage cards in a stable, useful order."""
+    events = db.get_recent_health_events(user_id, family_member_id, limit=10)
+    medications = db.get_medications(user_id, family_member_id)
+    reports = db.get_reports(user_id, family_member_id, limit=3)
+    fallback = _daily_digest_fallback(events, medications, reports, preferred_language)
+    if not events and not medications and not reports:
+        return fallback
+
+    result = await complete_json(
+        "You create exactly three short homepage health cards without diagnosing.",
+        f"""
+Recent health events: {events}
+Active medications: {medications}
+Recent reports: {reports}
+
+Generate exactly 3 cards, in this exact order and using these exact types:
+1. health_concern - latest health concern based on recent symptoms, reports, or medicines.
+2. care_steps - what the patient should avoid and do, as 2-3 crisp points in one short text.
+3. quick_summary - one short overall summary of the current health context.
+
+Rules:
+- Keep every card concise. No long paragraphs.
+- Do not diagnose. Use "possible concern" language.
+- If there is no concern, say there is no major new concern from available data.
+- Reply in {"fluent Hindi using Devanagari" if preferred_language == "hi" else "natural English"}.
+Return JSON array: [{{"type": "...", "icon_emoji": "...", "text": "..."}}]
+""",
+        fallback,
+        provider="reasoning",
+    )
+    if not isinstance(result, list):
+        return fallback
+
+    valid_types = {"health_concern", "care_steps", "quick_summary"}
+    normalized = [
+        {
+            "type": item.get("type"),
+            "icon_emoji": str(item.get("icon_emoji") or "*"),
+            "text": str(item.get("text") or "").strip(),
+        }
+        for item in result
+        if isinstance(item, dict)
+        and item.get("type") in valid_types
+        and str(item.get("text") or "").strip()
+    ]
+    by_type = {card["type"]: card for card in normalized}
+    return [
+        {
+            "type": fallback_card["type"],
+            "icon_emoji": by_type.get(fallback_card["type"], fallback_card).get("icon_emoji") or fallback_card["icon_emoji"],
+            "text": _crisp_card_text(by_type.get(fallback_card["type"], fallback_card).get("text") or fallback_card["text"]),
+        }
+        for fallback_card in fallback
+    ]
+
+
+def _daily_digest_fallback(
+    events: list[dict],
+    medications: list[dict],
+    reports: list[dict],
+    preferred_language: str,
+) -> list[dict]:
+    unresolved = next((event for event in events if event.get("resolved") is False), None)
+    latest_event = unresolved or (events[0] if events else None)
+    flagged = next((report for report in reports if report.get("flagged_values")), None)
+    latest_description = (
+        (latest_event or {}).get("description")
+        or (flagged or {}).get("ai_summary")
+        or "No major new concern from available data"
+    )
+    drug = (medications[0].get("drug_name") if medications else None) or "active medicines"
+    report_note = "recent report values need review" if flagged else "no flagged report values available"
+    concern = f"Latest concern: {latest_description}."
+    steps = f"Avoid: missed doses, ignoring worsening symptoms. Do: take {drug} on time, track changes, hydrate."
+    summary = f"Quick summary: {len(events)} recent events, {len(medications)} active medicines, {len(reports)} reports; {report_note}."
+    return [
+        {"type": "health_concern", "icon_emoji": "!", "text": _crisp_card_text(concern)},
+        {"type": "care_steps", "icon_emoji": ">", "text": _crisp_card_text(steps)},
+        {"type": "quick_summary", "icon_emoji": "i", "text": _crisp_card_text(summary)},
+    ]
+
+
+def _crisp_card_text(text: str) -> str:
+    text = " ".join(str(text).split())
+    return text[:260].rstrip()
+
+
 def _fallback_proactive_greeting(
     name: str,
     recent_events: list[dict],

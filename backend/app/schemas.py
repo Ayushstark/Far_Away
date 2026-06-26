@@ -84,6 +84,9 @@ class GreetingResponse(BaseModel):
 
 class InsightCard(BaseModel):
     type: Literal[
+        "health_concern",
+        "care_steps",
+        "quick_summary",
         "medication_reminder",
         "trend_positive",
         "followup_question",

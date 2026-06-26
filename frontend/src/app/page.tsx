@@ -3,7 +3,6 @@
 import axios from "axios";
 import {
   AlertTriangle,
-  Activity,
   BarChart3,
   Bell,
   BellRing,
@@ -25,7 +24,6 @@ import {
   Volume2,
   VolumeX,
   Send,
-  Smartphone,
   Sun,
   UploadCloud,
   UserRound,
@@ -106,7 +104,7 @@ type ChatMessage = {
 };
 
 type InsightCard = {
-  type: "medication_reminder" | "trend_positive" | "followup_question" | "report_alert";
+  type: "health_concern" | "care_steps" | "quick_summary" | "medication_reminder" | "trend_positive" | "followup_question" | "report_alert";
   icon_emoji: string;
   text: string;
 };
@@ -679,7 +677,6 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
             <ProfileScreen profile={activeProfile} familyMemberId={familyMemberId} />
           )}
           <MobileNavigation active={tab} onChange={setTab} />
-          <AgentActivityPanel steps={thinkingSteps} loading={loading || greetingLoading} />
         </section>
       </div>
 
@@ -854,12 +851,18 @@ function DailyDigest({
   onSelect: (text: string) => void;
 }) {
   const styles: Record<InsightCard["type"], string> = {
+    health_concern: "border-[#efc0b8] bg-[#fff2ef]",
+    care_steps: "border-[#ead39a] bg-[#fff8e7]",
+    quick_summary: "border-[#bcdcc9] bg-[#eef8f2]",
     medication_reminder: "border-[#b9d5e7] bg-[#eef7fc]",
     trend_positive: "border-[#bcdcc9] bg-[#eef8f2]",
     followup_question: "border-[#ead39a] bg-[#fff8e7]",
     report_alert: "border-[#efc0b8] bg-[#fff2ef]",
   };
   const icons = {
+    health_concern: AlertTriangle,
+    care_steps: HeartPulse,
+    quick_summary: FileText,
     medication_reminder: Pill,
     trend_positive: TrendingUp,
     followup_question: MessageCircle,
@@ -949,10 +952,6 @@ function Header({
         >
           {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
         </button>
-        <span className="hidden items-center gap-1 rounded-full border border-[#d9e7e1] bg-[#f6faf8] px-2.5 py-1 text-[11px] font-semibold text-[#526b61] lg:flex">
-          <Smartphone size={13} />
-          PWA ready
-        </span>
         <button
           type="button"
           onClick={() => void onSignOut()}
@@ -1238,32 +1237,6 @@ function ThinkingTrail({
         );
       })}
     </div>
-  );
-}
-
-function AgentActivityPanel({ steps, loading }: { steps: string[]; loading: boolean }) {
-  const visibleSteps = steps.length ? steps : loading ? ["Checking urgency", "Reading profile context", "Preparing response"] : [];
-  if (!visibleSteps.length) return null;
-  return (
-    <aside className="pointer-events-none absolute right-5 top-24 z-10 hidden w-72 rounded-2xl border border-[#c8ded4] bg-white/95 p-4 shadow-xl shadow-[#0b3d31]/10 backdrop-blur lg:block">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="grid size-8 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]">
-          <Activity size={17} />
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-[#18352a]">Agent thinking</p>
-          <p className="text-[11px] text-[#6c7e76]">Live CareOS routing trail</p>
-        </div>
-      </div>
-      <div className="space-y-2">
-        {visibleSteps.slice(-4).map((step, index) => (
-          <div key={`${step}-${index}`} className="thinking-step flex items-center gap-2 rounded-lg border border-[#e1ece7] bg-[#f8fbfa] px-3 py-2 text-xs text-[#405c51]">
-            {index === visibleSteps.length - 1 && loading ? <LoaderCircle className="animate-spin text-[#12664f]" size={14} /> : <HeartPulse className="text-[#12664f]" size={14} />}
-            <span>{step}{step === "Done" ? "" : "..."}</span>
-          </div>
-        ))}
-      </div>
-    </aside>
   );
 }
 
