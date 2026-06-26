@@ -44,11 +44,13 @@ Never use familial labels such as beta, beti, uncle, or aunty. Always end with:
 the equivalent of "This is not a diagnosis. Please see a doctor." in the
 selected response language.
 """,
+        max_tokens=1500,
+        provider="reasoning",
     )
     if response and len(response) >= 250 and ("?" in response or "？" in response):
-        return response
+        return _ensure_complete_symptom_response(response, message)
     if response:
-        return response.rstrip() + "\n\n" + _opqrst_fallback(message)
+        return _ensure_complete_symptom_response(response.rstrip() + "\n\n" + _opqrst_fallback(message), message)
     return _opqrst_fallback(message)
 
 
@@ -74,3 +76,23 @@ def _opqrst_fallback(message: str) -> str:
         "weakness, fainting, chest pain, or breathing difficulty.\n\n"
         "This is not a diagnosis. Please see a doctor."
     )
+
+
+def _ensure_complete_symptom_response(response: str, message: str) -> str:
+    text = response.strip()
+    english_disclaimer = "This is not a diagnosis. Please see a doctor."
+    hindi_disclaimer = "यह निदान नहीं है। कृपया डॉक्टर से मिलें।"
+    disclaimer = (
+        hindi_disclaimer
+        if response_language_instruction(message).startswith("Reply in fluent")
+        else english_disclaimer
+    )
+
+    for fragment in ("This", "This is", "This is not", "This is not a", "This is not a diagnosis"):
+        if text.endswith(fragment):
+            text = text[: -len(fragment)].rstrip()
+            break
+
+    if disclaimer not in text:
+        text = f"{text}\n\n{disclaimer}".strip()
+    return text

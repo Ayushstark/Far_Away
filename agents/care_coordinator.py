@@ -52,7 +52,7 @@ Generate ONE proactive greeting of only 1-2 short sentences.
     return _fallback_proactive_greeting(name, recent_events, medications, preferred_language)
 
 
-async def generate_daily_digest(
+async def _legacy_generate_daily_digest(
     user_id: str,
     family_member_id: str | None = None,
     preferred_language: str = "en",
@@ -101,7 +101,7 @@ Return JSON array: [{{"type": "...", "icon_emoji": "...", "text": "..."}}]
     return cards or fallback
 
 
-def _daily_digest_fallback(
+def _legacy_daily_digest_fallback(
     events: list[dict],
     medications: list[dict],
     reports: list[dict],

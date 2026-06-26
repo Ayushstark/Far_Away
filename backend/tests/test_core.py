@@ -313,6 +313,16 @@ def test_symptom_agent_prompt_uses_opqrst_and_old_cart(monkeypatch) -> None:
     assert "OLD CART" in calls["prompt"]
 
 
+def test_symptom_response_finishes_truncated_disclaimer() -> None:
+    result = symptom._ensure_complete_symptom_response(
+        "Rest, hydrate, and monitor your symptoms.\n\nThis",
+        "I have a mild headache",
+    )
+
+    assert result.endswith("This is not a diagnosis. Please see a doctor.")
+    assert not result.endswith("\n\nThis")
+
+
 def test_empty_family_digest_never_invents_health_claims(monkeypatch) -> None:
     monkeypatch.setattr(db, "get_recent_health_events", lambda *args, **kwargs: [])
     monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [])
