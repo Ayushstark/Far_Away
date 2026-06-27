@@ -96,6 +96,35 @@ class InsightCard(BaseModel):
     text: str
 
 
+class DailyPlanItem(BaseModel):
+    type: Literal["medicine", "symptom", "report", "habit"]
+    title: str
+    detail: str
+    priority: Literal["high", "medium", "low"] = "medium"
+    action_text: str | None = None
+
+
+class DailyPlanResponse(BaseModel):
+    user_id: str
+    family_member_id: str | None = None
+    items: list[DailyPlanItem]
+
+
+class TimelineItem(BaseModel):
+    date: str
+    category: Literal["symptom", "report", "medication"]
+    title: str
+    detail: str
+    severity: str | None = None
+    status: str | None = None
+
+
+class TimelineResponse(BaseModel):
+    user_id: str
+    family_member_id: str | None = None
+    items: list[TimelineItem]
+
+
 class ReportResponse(BaseModel):
     profile_id: str
     filename: str

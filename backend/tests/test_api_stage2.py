@@ -226,6 +226,51 @@ def test_daily_digest_endpoint_returns_cards(monkeypatch) -> None:
     assert response.json()[0]["type"] == "medication_reminder"
 
 
+def test_daily_plan_endpoint_returns_actionable_items(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api,
+        "build_daily_plan",
+        lambda user_id, family_member_id=None: [
+            {
+                "type": "symptom",
+                "title": "Check: headache",
+                "detail": "Tell CareOS if it is better, worse, or same.",
+                "priority": "medium",
+                "action_text": "How is the headache now?",
+            }
+        ],
+    )
+
+    response = client.get("/daily-plan/user-1?family_member_id=family-1")
+
+    assert response.status_code == 200
+    assert response.json()["family_member_id"] == "family-1"
+    assert response.json()["items"][0]["title"] == "Check: headache"
+
+
+def test_timeline_endpoint_returns_structured_history(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api,
+        "build_health_timeline",
+        lambda user_id, family_member_id=None: [
+            {
+                "date": "2026-06-27",
+                "category": "medication",
+                "title": "Metformin",
+                "detail": "500 mg - morning",
+                "severity": None,
+                "status": "active",
+            }
+        ],
+    )
+
+    response = client.get("/timeline/user-1")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["category"] == "medication"
+    assert response.json()["items"][0]["status"] == "active"
+
+
 def test_follow_up_response_marks_original_event_resolved(monkeypatch) -> None:
     calls: dict[str, object] = {}
     monkeypatch.setattr(db, "mark_event_resolved", lambda event_id: calls.setdefault("resolved", event_id))

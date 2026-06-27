@@ -109,6 +109,31 @@ type InsightCard = {
   text: string;
 };
 
+type DailyPlanItem = {
+  type: "medicine" | "symptom" | "report" | "habit";
+  title: string;
+  detail: string;
+  priority: "high" | "medium" | "low";
+  action_text?: string | null;
+};
+
+type DailyPlanResponse = {
+  items: DailyPlanItem[];
+};
+
+type TimelineItem = {
+  date: string;
+  category: "symptom" | "report" | "medication";
+  title: string;
+  detail: string;
+  severity?: string | null;
+  status?: string | null;
+};
+
+type TimelineResponse = {
+  items: TimelineItem[];
+};
+
 type Profile = {
   id: string | number;
   name: string;
@@ -249,6 +274,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [greetingLoading, setGreetingLoading] = useState(true);
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
   const [insightCards, setInsightCards] = useState<InsightCard[]>([]);
+  const [dailyPlan, setDailyPlan] = useState<DailyPlanItem[]>([]);
+  const [planLoading, setPlanLoading] = useState(true);
   const [digestLoading, setDigestLoading] = useState(true);
   const [listening, setListening] = useState(false);
   const [voiceSendSeconds, setVoiceSendSeconds] = useState<number | null>(null);
@@ -411,6 +438,27 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
     return () => controller.abort();
   }, [OWNER_ID, activeProfile.id, activeProfileId, familyMemberId, preferredLanguage]);
 
+  useEffect(() => {
+    const scope = activeProfileId;
+    const controller = new AbortController();
+    axios.get<DailyPlanResponse>(`${API_URL}/daily-plan/${OWNER_ID}`, {
+      params: { family_member_id: familyMemberId },
+      signal: controller.signal,
+    })
+      .then(({ data }) => {
+        if (activeProfileScopeRef.current === scope) setDailyPlan(data.items);
+      })
+      .catch((error) => {
+        if (!axios.isCancel(error) && activeProfileScopeRef.current === scope) {
+          setDailyPlan([]);
+        }
+      })
+      .finally(() => {
+        if (activeProfileScopeRef.current === scope) setPlanLoading(false);
+      });
+    return () => controller.abort();
+  }, [OWNER_ID, activeProfileId, familyMemberId]);
+
   function setPreferredLanguage(language: PreferredLanguage) {
     window.localStorage.setItem("careos-language", language);
     window.dispatchEvent(new Event(LANGUAGE_EVENT));
@@ -422,6 +470,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
     const nextFamilyId = String(profile.id) === OWNER_ID ? "owner" : String(profile.id);
     setMessages(loadChatMessages(`careos-chat:${OWNER_ID}:${nextFamilyId}`));
     setInsightCards([]);
+    setDailyPlan([]);
+    setPlanLoading(true);
     setDigestLoading(true);
     activeProfileScopeRef.current = String(profile.id);
     setActiveProfile(profile);
@@ -647,6 +697,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               loading={loading}
               greetingLoading={greetingLoading}
               thinkingSteps={thinkingSteps}
+              dailyPlan={dailyPlan}
+              planLoading={planLoading}
               insightCards={insightCards}
               digestLoading={digestLoading}
               listening={listening}
@@ -660,6 +712,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               onVoice={toggleVoiceInput}
               onLanguage={setPreferredLanguage}
               onInsight={sendPrompt}
+              onPlanAction={sendPrompt}
             />
           ) : tab === "reports" ? (
             <ReportsScreen familyMemberId={familyMemberId} />
@@ -896,6 +949,70 @@ function DailyDigest({
   );
 }
 
+function DailyPlan({
+  items,
+  loading,
+  onAction,
+}: {
+  items: DailyPlanItem[];
+  loading: boolean;
+  onAction: (text: string) => void;
+}) {
+  const icons: Record<DailyPlanItem["type"], typeof Pill> = {
+    medicine: Pill,
+    symptom: HeartPulse,
+    report: FileText,
+    habit: BellRing,
+  };
+  const priorityClass: Record<DailyPlanItem["priority"], string> = {
+    high: "border-[#efc0b8] bg-[#fff5f2]",
+    medium: "border-[#ead39a] bg-[#fffaf0]",
+    low: "border-[#c7ddd2] bg-white",
+  };
+
+  if (loading) {
+    return <div className="h-28 animate-pulse rounded-2xl border border-[#d9e7e1] bg-white shadow-sm" aria-label="Loading daily plan" />;
+  }
+  if (!items.length) return null;
+
+  return (
+    <section className="rounded-2xl border border-[#cfe0d8] bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#60736a]">CareOS daily plan</p>
+          <h2 className="mt-1 text-base font-semibold text-[#18352a]">What needs attention next</h2>
+        </div>
+        <span className="grid size-9 place-items-center rounded-xl bg-[#eef7f3] text-[#12664f]">
+          <Bell size={18} />
+        </span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {items.map((item, index) => {
+          const Icon = icons[item.type];
+          return (
+            <button
+              key={`${item.type}-${index}`}
+              type="button"
+              onClick={() => onAction(item.action_text ?? `${item.title}. ${item.detail}`)}
+              className={`rounded-xl border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${priorityClass[item.priority]}`}
+            >
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-white/80 text-[#12664f] shadow-sm">
+                  <Icon size={17} />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-[#17362b]">{item.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-[#61746b]">{item.detail}</span>
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Header({
   tab,
   activeProfile,
@@ -971,6 +1088,8 @@ function ChatScreen({
   loading,
   greetingLoading,
   thinkingSteps,
+  dailyPlan,
+  planLoading,
   insightCards,
   digestLoading,
   listening,
@@ -982,6 +1101,7 @@ function ChatScreen({
   onVoice,
   onLanguage,
   onInsight,
+  onPlanAction,
   voiceSendSeconds,
   onCancelVoiceSend,
 }: {
@@ -989,6 +1109,8 @@ function ChatScreen({
   loading: boolean;
   greetingLoading: boolean;
   thinkingSteps: string[];
+  dailyPlan: DailyPlanItem[];
+  planLoading: boolean;
   insightCards: InsightCard[];
   digestLoading: boolean;
   listening: boolean;
@@ -1000,6 +1122,7 @@ function ChatScreen({
   onVoice: () => void;
   onLanguage: (language: PreferredLanguage) => void;
   onInsight: (text: string) => void;
+  onPlanAction: (text: string) => void;
   voiceSendSeconds: number | null;
   onCancelVoiceSend: () => void;
 }) {
@@ -1029,6 +1152,13 @@ function ChatScreen({
               </div>
             </div>
           </div>
+          {(planLoading || dailyPlan.length > 0) && (
+            <DailyPlan
+              items={dailyPlan}
+              loading={planLoading}
+              onAction={onPlanAction}
+            />
+          )}
           {(digestLoading || insightCards.length > 0) && (
             <DailyDigest
               cards={insightCards}
@@ -1682,7 +1812,24 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
   const [error, setError] = useState("");
   const historyScope = familyMemberId ?? OWNER_ID;
   const [historyState, setHistoryState] = useState({ scope: "", text: "" });
+  const [timelineState, setTimelineState] = useState<{ scope: string; items: TimelineItem[] }>({ scope: "", items: [] });
   const historyLoading = historyState.scope !== historyScope;
+  const timelineLoading = timelineState.scope !== historyScope;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    axios.get<TimelineResponse>(`${API_URL}/timeline/${OWNER_ID}`, {
+      params: { family_member_id: familyMemberId },
+      signal: controller.signal,
+    })
+      .then(({ data }) => setTimelineState({ scope: historyScope, items: data.items }))
+      .catch((error) => {
+        if (!axios.isCancel(error)) {
+          setTimelineState({ scope: historyScope, items: [] });
+        }
+      });
+    return () => controller.abort();
+  }, [OWNER_ID, familyMemberId, historyScope]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1732,9 +1879,7 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
       <ProfileField label="Allergies" value={formatList(profile.allergies)} />
       <section className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <p className="text-xs font-semibold uppercase text-[#71827a]">Health timeline</p>
-        {historyLoading
-          ? <p className="mt-3 text-sm text-[#687971]">Loading health details...</p>
-          : <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#35463e]">{historyState.text}</p>}
+        <HealthTimeline items={timelineState.items} loading={timelineLoading} fallbackText={historyState.text} fallbackLoading={historyLoading} />
       </section>
       <ErrorText text={error} />
       <button onClick={downloadBrief} disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#12664f] text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50 sm:w-auto sm:px-5">
@@ -1742,6 +1887,60 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
         Generate doctor brief
       </button>
     </ScreenShell>
+  );
+}
+
+function HealthTimeline({
+  items,
+  loading,
+  fallbackText,
+  fallbackLoading,
+}: {
+  items: TimelineItem[];
+  loading: boolean;
+  fallbackText: string;
+  fallbackLoading: boolean;
+}) {
+  const icons: Record<TimelineItem["category"], typeof HeartPulse> = {
+    symptom: HeartPulse,
+    report: FileText,
+    medication: Pill,
+  };
+  const tones: Record<TimelineItem["category"], string> = {
+    symptom: "bg-[#fff6e8] text-[#9b5a16]",
+    report: "bg-[#f0f7ff] text-[#245f86]",
+    medication: "bg-[#eef8f2] text-[#12664f]",
+  };
+
+  if (loading) {
+    return <p className="mt-3 text-sm text-[#687971]">Loading health details...</p>;
+  }
+  if (!items.length) {
+    return fallbackLoading
+      ? <p className="mt-3 text-sm text-[#687971]">Loading health details...</p>
+      : <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#35463e]">{fallbackText || "No timeline entries yet."}</p>;
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      {items.map((item, index) => {
+        const Icon = icons[item.category];
+        return (
+          <article key={`${item.category}-${item.date}-${index}`} className="relative rounded-xl border border-[#e1ece7] bg-[#fbfdfc] p-3 pl-12">
+            <span className={`absolute left-3 top-3 grid size-7 place-items-center rounded-lg ${tones[item.category]}`}>
+              <Icon size={15} />
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-[#18352a]">{item.title}</p>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#687971] ring-1 ring-[#dce8e2]">{item.date}</span>
+              {item.status && <span className="rounded-full bg-[#eef7f3] px-2 py-0.5 text-[11px] font-medium text-[#12664f]">{item.status}</span>}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-[#60736a]">{item.detail}</p>
+            {item.severity && <p className="mt-2 text-[11px] font-medium uppercase text-[#87958e]">Severity: {item.severity}</p>}
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

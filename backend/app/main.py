@@ -27,6 +27,7 @@ from backend.app.schemas import (
     IntentClassificationResponse,
     IntentExtractionResponse,
     TextToSpeechRequest,
+    DailyPlanResponse,
     AuthProfileRequest,
     AuthSignupRequest,
     FamilyMemberCreate,
@@ -35,10 +36,12 @@ from backend.app.schemas import (
     InteractionCheckRequest,
     InteractionCheckResponse,
     InsightCard,
+    TimelineResponse,
 )
 from backend.app.services.input_understanding import extract_intent
 from backend.app.services.orchestrator import Orchestrator
 from backend.app.services.speech import generate_speech
+from backend.app.services.standout import build_daily_plan, build_health_timeline
 from backend.app.config import settings
 
 app = FastAPI(title="CareOS Healthcare API", version="0.2.0")
@@ -288,6 +291,36 @@ async def daily_digest(
         return [InsightCard.model_validate(card) for card in cards]
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not generate daily digest: {exc}") from exc
+
+
+@app.get("/daily-plan/{user_id}", response_model=DailyPlanResponse)
+async def daily_plan(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> DailyPlanResponse:
+    try:
+        return DailyPlanResponse(
+            user_id=user_id,
+            family_member_id=family_member_id,
+            items=build_daily_plan(user_id, family_member_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not build daily plan: {exc}") from exc
+
+
+@app.get("/timeline/{user_id}", response_model=TimelineResponse)
+async def health_timeline(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> TimelineResponse:
+    try:
+        return TimelineResponse(
+            user_id=user_id,
+            family_member_id=family_member_id,
+            items=build_health_timeline(user_id, family_member_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not build timeline: {exc}") from exc
 
 
 @app.post("/api/memory/search", response_model=MemorySearchResponse)
