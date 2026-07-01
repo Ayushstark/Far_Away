@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Download,
   FileText,
+  History as HistoryIcon,
   HeartPulse,
   LoaderCircle,
   LogOut,
@@ -39,6 +40,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL
     ? "https://far-away-8cd0.onrender.com"
     : "http://localhost:8000");
 const DEMO_OWNER_ID = "9000001";
+const CHAT_VISIBLE_LIMIT = 8;
+const CHAT_HISTORY_LIMIT = 120;
 const OwnerContext = createContext(DEMO_OWNER_ID);
 
 function useOwnerId() {
@@ -53,7 +56,7 @@ function loadChatMessages(key: string): ChatMessage[] {
   }
 }
 
-type Tab = "chat" | "reports" | "medications" | "family" | "profile";
+type Tab = "chat" | "history" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
 type PreferredLanguage = "en" | "hi";
 type ThemeMode = "light" | "dark";
@@ -192,6 +195,7 @@ async function createCareOSAudio(text: string, preferredLanguage: PreferredLangu
 
 const navigation = [
   { id: "chat" as const, label: "Chat", icon: MessageCircle },
+  { id: "history" as const, label: "History", icon: HistoryIcon },
   { id: "reports" as const, label: "Reports", icon: FileText },
   { id: "medications" as const, label: "Medications", icon: Pill },
   { id: "family" as const, label: "Family", icon: Users },
@@ -199,6 +203,7 @@ const navigation = [
 ];
 
 const tabTitles: Record<Exclude<Tab, "chat">, string> = {
+  history: "Chat history",
   reports: "Reports",
   medications: "Medications",
   family: "Family",
@@ -291,8 +296,12 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [activeProfile, setActiveProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [ownerProfile, setOwnerProfile] = useState<Profile>({ id: OWNER_ID, name: "My profile" });
   const [family, setFamily] = useState<Profile[]>([]);
+  const initialMessageKey = `careos-chat:${OWNER_ID}:owner`;
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(() =>
+    loadChatMessages(initialMessageKey),
+  );
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    loadChatMessages(`careos-chat:${OWNER_ID}:owner`),
+    loadChatMessages(initialMessageKey).slice(-CHAT_VISIBLE_LIMIT),
   );
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const greetingScopeRef = useRef<string | null>(null);
@@ -322,8 +331,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   }, [messages, loading]);
 
   useEffect(() => {
-    window.localStorage.setItem(messageStorageKey, JSON.stringify(messages.slice(-30)));
-  }, [messageStorageKey, messages]);
+    window.localStorage.setItem(messageStorageKey, JSON.stringify(chatHistory.slice(-CHAT_HISTORY_LIMIT)));
+  }, [chatHistory, messageStorageKey]);
 
   useEffect(() => {
     return () => {
@@ -371,12 +380,14 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
       .then(async ({ data }) => {
         if (greetingScopeRef.current !== scope) return;
         followUpEventIdRef.current = data.follow_up_event_id;
-        setMessages((current) => current.length ? current : [{
+        const greetingMessage = {
           id: "proactive-greeting",
           speaker: "assistant" as const,
           text: data.greeting,
           agents: ["care_coordinator"],
-        }]);
+        };
+        setMessages((current) => current.length ? current : [greetingMessage]);
+        setChatHistory((current) => current.length ? current : [greetingMessage]);
 
         // Browsers may require a prior tap for autoplay; manual speaker playback remains available.
         const { audio, url } = await createCareOSAudio(data.greeting, preferredLanguage);
@@ -468,7 +479,9 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
     cancelVoiceAutoSend();
     responseAudioRef.current?.pause();
     const nextFamilyId = String(profile.id) === OWNER_ID ? "owner" : String(profile.id);
-    setMessages(loadChatMessages(`careos-chat:${OWNER_ID}:${nextFamilyId}`));
+    const storedMessages = loadChatMessages(`careos-chat:${OWNER_ID}:${nextFamilyId}`);
+    setChatHistory(storedMessages);
+    setMessages(storedMessages.slice(-CHAT_VISIBLE_LIMIT));
     setInsightCards([]);
     setDailyPlan([]);
     setPlanLoading(true);
@@ -489,6 +502,17 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
   function handleInput(value: string) {
     cancelVoiceAutoSend();
     setInput(value);
+  }
+
+  function appendChatMessage(message: ChatMessage) {
+    setChatHistory((current) => [...current, message].slice(-CHAT_HISTORY_LIMIT));
+    setMessages((current) => [...current, message].slice(-CHAT_VISIBLE_LIMIT));
+  }
+
+  function resetChatHistory() {
+    setChatHistory([]);
+    setMessages([]);
+    window.localStorage.removeItem(messageStorageKey);
   }
 
   async function speakCareOS(text: string) {
@@ -517,20 +541,19 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
 
     cancelVoiceAutoSend();
     setInput("");
-    setMessages((current) => [
-      ...current,
-      { id: crypto.randomUUID(), speaker: "user", text },
-    ]);
+    const userMessage = { id: crypto.randomUUID(), speaker: "user" as const, text };
+    appendChatMessage(userMessage);
     setLoading(true);
 
     try {
+      const requestHistory = [...chatHistory, userMessage];
       const { data } = await axios.post<ChatReply>(`${API_URL}/chat`, {
         message: text,
         profile_id: OWNER_ID,
         family_member_id: familyMemberId,
         preferred_language: preferredLanguage,
-        previous_assistant_message: [...messages].reverse().find((message) => message.speaker === "assistant")?.text,
-        conversation_history: messages.slice(-8).map((message) => `${message.speaker}: ${message.text}`),
+        previous_assistant_message: [...chatHistory].reverse().find((message) => message.speaker === "assistant")?.text,
+        conversation_history: requestHistory.slice(-8).map((message) => `${message.speaker}: ${message.text}`),
         follow_up_event_id: followUpEventIdRef.current,
       });
       if (activeProfileScopeRef.current !== requestProfileScope) return;
@@ -546,15 +569,12 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
         setThinkingSteps((current) => [...current, "Done"]);
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          speaker: "assistant",
-          text: data.message,
-          agents: data.agents_used,
-        },
-      ]);
+      appendChatMessage({
+        id: crypto.randomUUID(),
+        speaker: "assistant",
+        text: data.message,
+        agents: data.agents_used,
+      });
       void speakCareOS(data.message);
       setThinkingSteps([]);
       if (data.emergency) {
@@ -570,26 +590,20 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
       if (activeProfileScopeRef.current !== requestProfileScope) return;
       setThinkingSteps([]);
       const detail = axios.isAxiosError(error) && error.response?.data?.detail;
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          speaker: "system",
-          text: typeof detail === "string"
-            ? `CareOS service error: ${detail}`
-            : "CareOS could not reach the health service. Please try again.",
-        },
-      ]);
+      appendChatMessage({
+        id: crypto.randomUUID(),
+        speaker: "system",
+        text: typeof detail === "string"
+          ? `CareOS service error: ${detail}`
+          : "CareOS could not reach the health service. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
   }
 
   function addSystemMessage(text: string) {
-    setMessages((current) => [
-      ...current,
-      { id: crypto.randomUUID(), speaker: "system", text },
-    ]);
+    appendChatMessage({ id: crypto.randomUUID(), speaker: "system", text });
   }
 
   async function toggleVoiceInput() {
@@ -713,6 +727,13 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               onVoice={toggleVoiceInput}
               onLanguage={setPreferredLanguage}
               onPlanAction={sendPrompt}
+            />
+          ) : tab === "history" ? (
+            <ChatHistoryScreen
+              profile={activeProfile}
+              messages={chatHistory}
+              onClear={resetChatHistory}
+              onBackToChat={() => setTab("chat")}
             />
           ) : tab === "reports" ? (
             <ReportsScreen familyMemberId={familyMemberId} />
@@ -1360,6 +1381,60 @@ function ThinkingTrail({
         );
       })}
     </div>
+  );
+}
+
+function ChatHistoryScreen({
+  profile,
+  messages,
+  onClear,
+  onBackToChat,
+}: {
+  profile: Profile;
+  messages: ChatMessage[];
+  onClear: () => void;
+  onBackToChat: () => void;
+}) {
+  const savedMessages = messages.filter((message) => message.speaker !== "system" || message.text.trim());
+  return (
+    <ScreenShell
+      title="Chat history"
+      description={`Saved conversation context for ${profile.name}. The main chat only shows the latest messages.`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+        <div>
+          <p className="text-sm font-semibold text-[#18352a]">{savedMessages.length} saved messages</p>
+          <p className="mt-1 text-xs text-[#687971]">Older exchanges stay here so the main chat remains focused.</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={onBackToChat} className="h-10 rounded-lg border border-[#b7cbc2] px-4 text-sm font-semibold text-[#12664f] transition hover:bg-[#eef7f3]">
+            Back to chat
+          </button>
+          <button type="button" onClick={onClear} disabled={!savedMessages.length} className="h-10 rounded-lg border border-[#efb2a8] px-4 text-sm font-semibold text-[#982d1d] transition hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:opacity-40">
+            Clear
+          </button>
+        </div>
+      </div>
+      {savedMessages.length ? (
+        <div className="space-y-3">
+          {savedMessages.map((message, index) => (
+            <article key={`${message.id}-${index}`} className={`rounded-xl border p-4 shadow-sm ${message.speaker === "user" ? "ml-auto max-w-2xl border-[#0f6b52]/20 bg-[#12664f] text-white" : "max-w-2xl border-[#d2e1da] bg-white text-[#17211d]"}`}>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className={`text-xs font-semibold uppercase ${message.speaker === "user" ? "text-white/75" : "text-[#12664f]"}`}>
+                  {message.speaker === "user" ? "You" : message.speaker === "assistant" ? "CareOS" : "System"}
+                </p>
+                {message.agents?.length ? (
+                  <p className={`text-[11px] ${message.speaker === "user" ? "text-white/65" : "text-[#71827a]"}`}>{message.agents.join(" + ").replaceAll("_", " ")}</p>
+                ) : null}
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="No saved chat history for this profile yet." />
+      )}
+    </ScreenShell>
   );
 }
 
@@ -2050,7 +2125,7 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
 
 function MobileNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-5 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-6 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
       {navigation.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
