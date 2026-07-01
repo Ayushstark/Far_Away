@@ -11,6 +11,7 @@ from backend.app.services.input_understanding import (
     extract_intent,
     understand_input,
 )
+from backend.app.services.speech import sanitize_tts_text
 from backend.app.schemas import EmergencyAssessment
 from backend.app.services.intent_classifier import classify_intent_fallback
 from agents import care_coordinator, emergency, symptom
@@ -25,6 +26,21 @@ def test_semantic_memory_is_user_scoped() -> None:
     results = memory.recall("user-a", "new tablet dose")
 
     assert results == ["Started a new blood pressure medicine"]
+
+
+def test_tts_sanitizer_removes_markdown_and_gendered_persona() -> None:
+    cleaned = sanitize_tts_text(
+        "**Possible causes:**\n"
+        "1. *Dehydration* or stress.\n"
+        "`HbA1c` is high. मैं आपकी सहायता कर सकता हूँ"
+    )
+
+    assert "*" not in cleaned
+    assert "`" not in cleaned
+    assert "Possible causes" in cleaned
+    assert "HbA1c" in cleaned
+    assert "कर सकता हूँ" not in cleaned
+    assert "CareOS आपकी सहायता के लिए तैयार है" in cleaned
 
 
 def test_chat_runs_emergency_first(monkeypatch) -> None:

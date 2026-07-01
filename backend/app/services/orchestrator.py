@@ -103,7 +103,7 @@ def is_casual_message(message: str) -> bool:
 
 def casual_response(message: str) -> str:
     if wants_hindi(message):
-        return "नमस्ते! मैं ठीक हूँ। आज मैं आपकी स्वास्थ्य संबंधी किस तरह सहायता कर सकता हूँ?"
+        return "नमस्ते! CareOS आपकी सहायता के लिए तैयार है। आज स्वास्थ्य से जुड़ी किस बात में मदद चाहिए?"
     return "Hello! I am doing well. How can I help you today?"
 
 
@@ -165,7 +165,7 @@ class Orchestrator:
         if outcome:
             if outcome == "resolved":
                 reply = (
-                    "यह सुनकर अच्छा लगा कि अब आप बेहतर हैं। मैं इस लक्षण को ठीक हुआ दर्ज कर रहा हूँ; दोबारा होने पर CareOS या डॉक्टर को बताएँ।"
+                    "यह सुनकर अच्छा लगा कि अब आप बेहतर हैं। CareOS में यह लक्षण ठीक हुआ दर्ज हो जाएगा; दोबारा होने पर CareOS या डॉक्टर को बताएँ।"
                     if preferred_language == "hi"
                     else "I am glad you are feeling better. I will mark this symptom as resolved; tell CareOS or your doctor if it returns."
                 )
@@ -210,7 +210,7 @@ class Orchestrator:
         understood = extraction or await extract_intent(message, conversation_history)
         if understood.primary_intent == "language_request":
             return ChatResponse(
-                message="हाँ, बिल्कुल। मैं आपसे हिंदी में बात कर सकता हूँ। आप क्या जानना चाहते हैं?",
+                message="हाँ, बिल्कुल। CareOS से हिंदी में बात हो सकती है। आप क्या जानना चाहते हैं?",
                 intents=[],
                 agents_used=["emergency_detector"],
                 results=[],
@@ -236,7 +236,7 @@ class Orchestrator:
                 )
             return ChatResponse(
                 message=(
-                    "मैं आपकी बात सही तरह समझना चाहता हूँ। क्या आप किसी लक्षण, दवा, मेडिकल रिपोर्ट या डॉक्टर से मिलने के बारे में पूछ रहे हैं?"
+                    "CareOS को आपकी बात सही तरह समझनी है। क्या आप किसी लक्षण, दवा, मेडिकल रिपोर्ट या डॉक्टर से मिलने के बारे में पूछ रहे हैं?"
                     if preferred_language == "hi"
                     else "I want to make sure I understand correctly. Are you asking about a symptom, medicine, medical report, or doctor visit?"
                 ),
@@ -251,7 +251,7 @@ class Orchestrator:
         if not actionable:
             return ChatResponse(
                 message=(
-                    "कृपया अपनी स्वास्थ्य संबंधी चिंता के बारे में थोड़ी और जानकारी दें, ताकि मैं सही CareOS एजेंट चुन सकूँ।"
+                    "कृपया अपनी स्वास्थ्य संबंधी चिंता के बारे में थोड़ी और जानकारी दें, ताकि CareOS सही एजेंट चुन पाए।"
                     if preferred_language == "hi"
                     else "Please share a little more detail about the health concern so I can choose the right care agent."
                 ),

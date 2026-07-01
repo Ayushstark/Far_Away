@@ -410,7 +410,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
           id: "welcome-fallback",
           speaker: "assistant",
           text: preferredLanguage === "hi"
-            ? "नमस्ते, मैं CareOS हूँ। पिछली बातचीत के बाद से आपकी तबीयत कैसी रही है?"
+            ? "नमस्ते, CareOS आपकी सहायता के लिए तैयार है। पिछली बातचीत के बाद से आपकी तबीयत कैसी रही है?"
             : "Hi, I am CareOS. How have you been feeling since your last check-in?",
           agents: ["care_coordinator"],
         }]);
