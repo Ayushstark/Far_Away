@@ -31,6 +31,13 @@ LANGUAGE_PATTERNS = (
     r"\b(reply|respond|talk|speak)\s+in\s+hindi\b",
     r"\bhindi\s+(mein|me)\s+(baat|bolo|boliye|jawab)\b",
 )
+SUMMARY_CARD_PATTERNS = (
+    r"^quick summary\b",
+    r"^latest health concern\b",
+    r"^based on (the )?health summary\b",
+    r"^(avoid|do):\b",
+    r"^what (the )?patient should avoid\b",
+)
 INTENT_TERMS: dict[IntentName, tuple[str, ...]] = {
     "symptom_analysis": (
         "pain", "hurt", "ache", "fever", "cough", "headache", "dizzy", "weak",
@@ -91,6 +98,14 @@ def extract_intent_fallback(message: str) -> IntentExtraction:
         return IntentExtraction("language_request", normalized_query="User wants to converse in Hindi.", detected_language=language, confidence=1.0)
     if any(re.search(pattern, text) for pattern in CASUAL_PATTERNS):
         return IntentExtraction("casual", normalized_query="Casual conversation.", detected_language=language, confidence=1.0)
+    if any(re.search(pattern, text) for pattern in SUMMARY_CARD_PATTERNS):
+        return IntentExtraction(
+            "unclear",
+            normalized_query="Dashboard summary card text, not a user care question.",
+            detected_language=language,
+            confidence=1.0,
+            needs_clarification=True,
+        )
 
     intents = tuple(
         intent for intent, terms in INTENT_TERMS.items()

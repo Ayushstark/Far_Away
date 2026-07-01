@@ -177,6 +177,7 @@ def test_input_understanding_blocks_random_clinical_routing() -> None:
     assert understand_input("Hello, how are you?").kind == "casual"
     assert understand_input("आप कैसे हैं?").kind == "casual"
     assert understand_input("Tell me something interesting").kind == "unclear"
+    assert understand_input("Quick summary: 4 recent events, 0 active medicines, 1 reports").kind == "unclear"
     assert understand_input("My stomach hurts").kind == "healthcare"
     assert classify_intent_fallback("My stomach hurts") == ["symptom_analysis"]
     assert classify_intent_fallback("Can we talk in Hindi?") == []

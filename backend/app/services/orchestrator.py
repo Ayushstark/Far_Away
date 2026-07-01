@@ -227,6 +227,13 @@ class Orchestrator:
             )
 
         if understood.primary_intent == "unclear" or understood.needs_clarification:
+            if understood.normalized_query == "Dashboard summary card text, not a user care question.":
+                return ChatResponse(
+                    message="That looks like a CareOS summary card, not a question. Please type what you want to know about it.",
+                    intents=[],
+                    agents_used=["emergency_detector"],
+                    results=[],
+                )
             return ChatResponse(
                 message=(
                     "मैं आपकी बात सही तरह समझना चाहता हूँ। क्या आप किसी लक्षण, दवा, मेडिकल रिपोर्ट या डॉक्टर से मिलने के बारे में पूछ रहे हैं?"

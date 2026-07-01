@@ -512,6 +512,7 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
 
   async function sendPrompt(text: string) {
     if (!text || loading) return;
+    if (insightCards.some((card) => card.text.trim() === text.trim())) return;
     const requestProfileScope = activeProfileScopeRef.current;
 
     cancelVoiceAutoSend();
