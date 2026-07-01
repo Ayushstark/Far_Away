@@ -711,7 +711,6 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               onSend={sendMessage}
               onVoice={toggleVoiceInput}
               onLanguage={setPreferredLanguage}
-              onInsight={sendPrompt}
               onPlanAction={sendPrompt}
             />
           ) : tab === "reports" ? (
@@ -896,12 +895,10 @@ function DailyDigest({
   cards,
   loading,
   preferredLanguage,
-  onSelect,
 }: {
   cards: InsightCard[];
   loading: boolean;
   preferredLanguage: PreferredLanguage;
-  onSelect: (text: string) => void;
 }) {
   const styles: Record<InsightCard["type"], string> = {
     health_concern: "border-[#efc0b8] bg-[#fff2ef]",
@@ -933,15 +930,13 @@ function DailyDigest({
         {cards.map((card, index) => {
           const Icon = icons[card.type];
           return (
-          <button
+          <article
             key={`${card.type}-${index}`}
-            type="button"
-            onClick={() => onSelect(card.text)}
-            className={`min-w-64 snap-start rounded-xl border p-4 text-left text-sm leading-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${styles[card.type]}`}
+            className={`min-w-64 snap-start rounded-xl border p-4 text-sm leading-5 shadow-sm ${styles[card.type]}`}
           >
             <Icon className="mb-2 text-[#12664f]" size={19} aria-hidden="true" />
             {card.text}
-          </button>
+          </article>
           );
         })}
       </div>
@@ -1100,7 +1095,6 @@ function ChatScreen({
   onSend,
   onVoice,
   onLanguage,
-  onInsight,
   onPlanAction,
   voiceSendSeconds,
   onCancelVoiceSend,
@@ -1121,7 +1115,6 @@ function ChatScreen({
   onSend: (event: FormEvent) => void;
   onVoice: () => void;
   onLanguage: (language: PreferredLanguage) => void;
-  onInsight: (text: string) => void;
   onPlanAction: (text: string) => void;
   voiceSendSeconds: number | null;
   onCancelVoiceSend: () => void;
@@ -1164,7 +1157,6 @@ function ChatScreen({
               cards={insightCards}
               loading={digestLoading}
               preferredLanguage={preferredLanguage}
-              onSelect={onInsight}
             />
           )}
           {messages.map((message) => (

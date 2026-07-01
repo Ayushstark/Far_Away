@@ -40,6 +40,9 @@ hackathon MVP is ready for demonstration.**
 - Verified Auth UUID to isolated CareOS profile mapping, with the Ramesh demo preserved
 - Profile-scoped persistent chat history with context-aware multi-message follow-ups
 - Consistent Lucide insight icons instead of provider-specific emoji shortcodes
+- Display-only three-card health summary on Chat: latest concern, avoid/do steps, quick summary
+- Actionable CareOS Daily Plan cards backed by medications, unresolved symptoms, and reports
+- Structured Profile timeline that merges symptoms, medications, and reports into one view
 
 ### Build Progress
 
@@ -51,8 +54,9 @@ hackathon MVP is ready for demonstration.**
 | 4 | Reports, medications, family, and profile screens | Complete |
 | 5 | Demo data, interface polish, tests, and documentation | Complete |
 | Companion upgrade | gTTS, proactive greeting, agent trail, follow-up loop, daily digest | Complete |
-| Family isolation | Profile-scoped chat, memory, medications, reports, insights, and timelines | Complete |
+| Family isolation | Profile-scoped chat, memory, medications, reports, insights, daily plan, and timelines | Complete |
 | Account access | Supabase Auth sign-up, sign-in, session persistence, profile mapping, and sign-out | Complete |
+| Standout layer | Daily plan, display-only insight cards, structured health timeline, report dashboard | Complete |
 
 ## Five-Agent Architecture
 
@@ -72,7 +76,9 @@ flowchart LR
     O --> MEM["ChromaDB semantic memory<br/>Gemini embeddings"]
     DB & MEM --> UI["Next.js care workspace"]
     DB --> PRO["Proactive greeting + daily insights"]
+    DB --> PLAN["Daily plan + structured timeline"]
     PRO --> UI
+    PLAN --> UI
 ```
 
 The emergency detector runs before all other agents on every chat message.
@@ -87,10 +93,44 @@ chat transcript. Healthcare messages are saved as profile-scoped Supabase
 analysis. Casual small talk is intentionally not persisted.
 
 Every family member has an isolated context. Selecting a family profile switches
-the chat, greeting, daily digest, health timeline, reports, medications, doctor
-brief, new health events, and ChromaDB memory namespace to that person. In-flight
+the chat, greeting, daily digest, daily plan, health timeline, reports,
+medications, doctor brief, new health events, and ChromaDB memory namespace to
+that person. In-flight
 requests from the previously selected profile are cancelled or ignored, so an
 owner medication such as Ramesh's Metformin cannot appear in Sita's view.
+
+## Standout Experience Layer
+
+CareOS now separates passive context from active next steps:
+
+- **Three chat insight cards** are display-only scenario summaries: latest health
+  concern, what to avoid/do, and a quick health summary.
+- **CareOS Daily Plan** is actionable: tapping a plan item sends a useful
+  follow-up prompt such as medicine guidance, report review, or unresolved
+  symptom check-in.
+- **Profile Health Timeline** turns raw Supabase records into a scannable
+  timeline of symptoms, active medications, and reports.
+- **Report Dashboard** highlights recent reports, flagged values, and review
+  status before the user opens a full report analysis.
+
+```mermaid
+flowchart TD
+    DB["Supabase profile data"] --> EVENTS["Recent health events"]
+    DB --> MEDS["Active medications"]
+    DB --> REPORTS["Recent reports"]
+    EVENTS --> DIGEST["Display-only insight cards"]
+    MEDS --> DIGEST
+    REPORTS --> DIGEST
+    EVENTS --> PLAN["Actionable Daily Plan"]
+    MEDS --> PLAN
+    REPORTS --> PLAN
+    EVENTS --> TL["Structured Profile Timeline"]
+    MEDS --> TL
+    REPORTS --> TL
+    DIGEST --> CHAT["Chat home"]
+    PLAN --> CHAT
+    TL --> PROFILE["Profile screen"]
+```
 
 Supabase Auth identities use UUIDs while the existing CareOS schema uses bigint
 profile IDs. `POST /auth/profile` verifies the Supabase access token, then safely
@@ -300,7 +340,8 @@ profile and the live Supabase project's `bigint` identifiers.
    symptom, medication, and specialist agent trail.
 10. Answer an unresolved-symptom greeting with `better now` to show CareOS
     closing the follow-up loop.
-11. Tap a daily insight card to send it directly into the conversation.
+11. Review the three display-only insight cards, then tap a CareOS Daily Plan
+    card to start a useful follow-up conversation.
 
 ## Main API Routes
 
@@ -309,6 +350,8 @@ profile and the live Supabase project's `bigint` identifiers.
 | `POST /chat` | Emergency-first agent orchestration |
 | `GET /greeting/{user_id}` | Generate a contextual proactive greeting |
 | `GET /daily-digest/{user_id}` | Generate today's health insight cards |
+| `GET /daily-plan/{user_id}` | Return actionable next-step cards from current health data |
+| `GET /timeline/{user_id}` | Return structured symptoms, medications, and reports timeline |
 | `POST /text-to-speech` | Stream Hindi or English CareOS speech as MP3 |
 | `POST /upload-report` | Store and analyze a PDF report |
 | `GET /reports/{user_id}` | List report history |
@@ -328,8 +371,8 @@ npm run lint
 npm run build
 ```
 
-Current automated verification: **38 backend tests passing**, frontend lint
-and TypeScript checks passing.
+Automated coverage includes backend API/database/orchestration tests plus
+frontend lint, TypeScript, and production build checks.
 
 ## What Is Already Done
 
@@ -346,7 +389,9 @@ and TypeScript checks passing.
 - Autonomous symptom-to-medication-to-specialist agent chain
 - Follow-up memory loop that resolves the originating health event
 - OPQRST/OLD CART symptom assessment for new and ongoing complaints
-- Daily medication, trend, follow-up, and report insight cards
+- Display-only latest concern, avoid/do, and quick-summary insight cards
+- Actionable CareOS Daily Plan and structured Profile Health Timeline
+- Daily medication, trend, follow-up, and report-aware care planning
 - Strict family-profile data isolation with stale-request protection
 - Live Supabase-compatible demo seed and schema migration
 - Loading, empty, progress, and error states across primary workflows
