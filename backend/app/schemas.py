@@ -56,6 +56,21 @@ class EmergencyAssessment(BaseModel):
     family_notified: bool = False
 
 
+class ContextUsage(BaseModel):
+    """What CareOS actually read into this reply, and what it deliberately left out.
+
+    `archived_excluded` counts archived/deleted/pending-deletion records across
+    health_events, reports, and medications combined - it exists so the chat UI
+    can say "2 archived records excluded" without the user having to visit
+    Data Control to see that lifecycle status is actually honored.
+    """
+
+    health_events_used: int = 0
+    medications_used: int = 0
+    reports_used: int = 0
+    archived_excluded: int = 0
+
+
 class ChatResponse(BaseModel):
     message: str
     intents: list[IntentName] = Field(default_factory=list)
@@ -66,6 +81,7 @@ class ChatResponse(BaseModel):
     follow_up_outcome: Literal["resolved", "ongoing"] | None = None
     emergency: bool = False
     emergency_details: EmergencyAssessment | None = None
+    context_used: ContextUsage | None = None
     disclaimer: str = (
         "CareOS provides general health information and does not replace a "
         "qualified medical professional."
@@ -124,7 +140,7 @@ class DailyPlanResponse(BaseModel):
 
 class TimelineItem(BaseModel):
     date: str
-    category: Literal["symptom", "report", "medication"]
+    category: Literal["symptom", "report", "medication", "lifecycle"]
     title: str
     detail: str
     severity: str | None = None

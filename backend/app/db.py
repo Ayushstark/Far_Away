@@ -25,7 +25,7 @@ TEXT_ARRAY_COLUMNS = {
 RETENTION_TABLES = {"health_events", "reports", "medications"}
 LIFECYCLE_STATUSES = ("active", "archived", "pending_deletion", "deleted")
 COMPLETION_STATUSES = ("complete", "partial", "blocked", "unresolved")
-RECORD_STATUS_FILTERS = ("active", "archived", "all")
+RECORD_STATUS_FILTERS = ("active", "archived", "deleted", "all")
 
 
 def get_client() -> Client:
@@ -161,7 +161,16 @@ def get_health_history(
     user_id: str,
     family_member_id: str | None = None,
     limit: int = 20,
+    *,
+    status: str = "active",
 ) -> str:
+    """Return the formatted health history used as chat/brief context.
+
+    `status` defaults to "active" so ordinary chat, daily plan, and daily
+    digest calls never see archived/deleted events. The doctor brief route
+    is the one caller that can opt into `status="all"` via its own
+    `include_archived` toggle.
+    """
     query = (
         get_client()
         .table("health_events")
@@ -171,7 +180,7 @@ def get_health_history(
         .eq("user_id", user_id)
     )
     response = (
-        _active_lifecycle(_scope_family_member(query, family_member_id))
+        _apply_status_filter(_scope_family_member(query, family_member_id), status)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -593,6 +602,34 @@ def get_retention_items(
     }
 
 
+def get_context_usage(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> dict[str, int]:
+    """Count what a chat reply actually read vs. what lifecycle status excluded.
+
+    Powers the "Context used" transparency panel: how many active health
+    events / medications / reports fed this reply, and how many
+    archived/deleted/pending-deletion records across those three tables were
+    deliberately left out.
+    """
+    active_counts: dict[str, int] = {}
+    excluded_total = 0
+    for table in RETENTION_TABLES:
+        query = get_client().table(table).select("lifecycle_status").eq("user_id", user_id)
+        rows = _scope_family_member(query, family_member_id).execute().data or []
+        active = sum(1 for row in rows if (row.get("lifecycle_status") or "active") == "active")
+        active_counts[table] = active
+        excluded_total += len(rows) - active
+
+    return {
+        "health_events_used": active_counts.get("health_events", 0),
+        "medications_used": active_counts.get("medications", 0),
+        "reports_used": active_counts.get("reports", 0),
+        "archived_excluded": excluded_total,
+    }
+
+
 def get_lifecycle_audit(
     user_id: str,
     family_member_id: str | None = None,
@@ -627,16 +664,18 @@ def _active_lifecycle(query: Any) -> Any:
 def _apply_status_filter(query: Any, status: str) -> Any:
     """Filter a reports/medications query by display-layer lifecycle status.
 
-    "active" (default) and "archived" narrow to that single lifecycle state;
-    an unrecognized value falls back to "active" so a bad query param from
-    the frontend can never accidentally widen what AI context or a screen
-    sees. "all" applies no lifecycle filter at all, matching what the Data
-    Control tab already shows.
+    "active", "archived", and "deleted" narrow to that single lifecycle
+    state; an unrecognized value falls back to "active" so a bad query param
+    from the frontend can never accidentally widen what AI context or a
+    screen sees. "all" applies no lifecycle filter at all, matching what the
+    Data Control tab already shows.
     """
     if status == "all":
         return query
     if status == "archived":
         return query.in_("lifecycle_status", ["archived"])
+    if status == "deleted":
+        return query.in_("lifecycle_status", ["deleted"])
     return _active_lifecycle(query)
 
 

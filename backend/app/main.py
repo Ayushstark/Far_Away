@@ -28,6 +28,7 @@ from backend.app.schemas import (
     IntentExtractionResponse,
     TextToSpeechRequest,
     DailyPlanResponse,
+    ContextUsage,
     AuthProfileRequest,
     AuthSignupRequest,
     FamilyMemberCreate,
@@ -197,6 +198,14 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 else request.profile_id
             ),
         )
+        if extraction.is_healthcare and not emergency.is_emergency:
+            try:
+                response.context_used = ContextUsage(
+                    **db.get_context_usage(request.profile_id, request.family_member_id)
+                )
+            except Exception:
+                # Context transparency is a nice-to-have; never block the reply on it.
+                pass
         if response.follow_up_outcome == "resolved" and request.follow_up_event_id:
             try:
                 db.mark_event_resolved(request.follow_up_event_id)
@@ -518,12 +527,14 @@ async def health_history(
 async def doctor_brief(
     user_id: str,
     family_member_id: str | None = None,
+    include_archived: bool = False,
 ) -> CareBriefResponse:
     try:
+        brief_status = "all" if include_archived else "active"
         brief = await create_care_brief(
             user_id,
-            health_history=db.get_health_history(user_id, family_member_id, limit=100),
-            current_medications=db.get_medications(user_id, family_member_id),
+            health_history=db.get_health_history(user_id, family_member_id, limit=100, status=brief_status),
+            current_medications=db.get_medications(user_id, family_member_id, status=brief_status),
             user_profile=db.get_profile(user_id, family_member_id),
         )
         return CareBriefResponse(profile_id=user_id, brief=brief)
@@ -565,19 +576,21 @@ async def medications(request: MedicationRequest) -> MedicationResponse:
 
 
 @app.get("/api/care-brief/{profile_id}", response_model=CareBriefResponse)
-async def care_brief(profile_id: str) -> CareBriefResponse:
-    return await doctor_brief(profile_id)
+async def care_brief(profile_id: str, include_archived: bool = False) -> CareBriefResponse:
+    return await doctor_brief(profile_id, include_archived=include_archived)
 
 
 @app.get("/api/care-brief/{profile_id}/pdf")
 async def care_brief_pdf(
     profile_id: str,
     family_member_id: str | None = None,
+    include_archived: bool = False,
 ) -> StreamingResponse:
+    brief_status = "all" if include_archived else "active"
     brief = await create_care_brief(
         profile_id,
-        health_history=db.get_health_history(profile_id, family_member_id, limit=100),
-        current_medications=db.get_medications(profile_id, family_member_id),
+        health_history=db.get_health_history(profile_id, family_member_id, limit=100, status=brief_status),
+        current_medications=db.get_medications(profile_id, family_member_id, status=brief_status),
         user_profile=db.get_profile(profile_id, family_member_id),
     )
     return StreamingResponse(

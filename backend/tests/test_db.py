@@ -264,6 +264,72 @@ def test_get_medications_status_filter_archived_and_all(monkeypatch) -> None:
     assert not any(call[0] == "medications" and call[1] == "in" for call in client.calls)
 
 
+def test_get_reports_and_medications_status_filter_deleted(monkeypatch) -> None:
+    client = FakeClient({"reports": [], "medications": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    db.get_reports("user-1", status="deleted")
+    assert ("reports", "in", "lifecycle_status", ["deleted"]) in client.calls
+
+    client.calls.clear()
+    db.get_medications("user-1", status="deleted")
+    assert ("medications", "in", "lifecycle_status", ["deleted"]) in client.calls
+
+
+def test_get_health_history_status_filter_all_and_deleted(monkeypatch) -> None:
+    client = FakeClient({"health_events": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    db.get_health_history("user-1", status="all")
+    assert not any(call[0] == "health_events" and call[1] == "in" for call in client.calls)
+
+    client.calls.clear()
+    db.get_health_history("user-1", status="deleted")
+    assert ("health_events", "in", "lifecycle_status", ["deleted"]) in client.calls
+
+
+def test_get_context_usage_counts_active_and_excluded_records(monkeypatch) -> None:
+    rows = {
+        "health_events": [
+            {"lifecycle_status": "active"},
+            {"lifecycle_status": "active"},
+            {"lifecycle_status": "archived"},
+        ],
+        "reports": [
+            {"lifecycle_status": "active"},
+            {"lifecycle_status": "deleted"},
+        ],
+        "medications": [
+            {"lifecycle_status": "active"},
+            {"lifecycle_status": "active"},
+        ],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    usage = db.get_context_usage("user-1")
+
+    assert usage["health_events_used"] == 2
+    assert usage["reports_used"] == 1
+    assert usage["medications_used"] == 2
+    assert usage["archived_excluded"] == 2
+
+
+def test_get_context_usage_treats_missing_lifecycle_status_as_active(monkeypatch) -> None:
+    rows = {
+        "health_events": [{}],
+        "reports": [],
+        "medications": [],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    usage = db.get_context_usage("user-1")
+
+    assert usage["health_events_used"] == 1
+    assert usage["archived_excluded"] == 0
+
+
 def test_lifecycle_action_archives_and_audits_record(monkeypatch) -> None:
     rows = {
         "reports": [{"id": "report-1", "user_id": "user-1", "lifecycle_status": "active"}],
@@ -302,3 +368,101 @@ def test_lifecycle_action_blocks_unowned_record(monkeypatch) -> None:
     assert result["lifecycle_status"] == "delete_failed"
     audit_call = next(call for call in client.calls if call[0] == "data_lifecycle_events" and call[1] == "insert")
     assert audit_call[2]["completion_status"] == "blocked"
+
+
+def test_lifecycle_action_restores_archived_medication(monkeypatch) -> None:
+    rows = {
+        "medications": [{"id": "med-1", "user_id": "user-1", "lifecycle_status": "archived"}],
+        "data_lifecycle_events": [],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.lifecycle_action(
+        user_id="user-1",
+        target_table="medications",
+        target_id="med-1",
+        action="restore",
+    )
+
+    assert result["completion_status"] == "complete"
+    assert result["lifecycle_status"] == "active"
+    update_call = next(call for call in client.calls if call[0] == "medications" and call[1] == "update")
+    assert update_call[2]["lifecycle_status"] == "active"
+    assert update_call[2]["restored_at"]
+    audit_call = next(call for call in client.calls if call[0] == "data_lifecycle_events" and call[1] == "insert")
+    assert audit_call[2]["previous_status"] == "archived"
+    assert audit_call[2]["next_status"] == "active"
+
+
+def test_lifecycle_action_soft_deletes_health_event(monkeypatch) -> None:
+    rows = {
+        "health_events": [{"id": "event-1", "user_id": "user-1", "lifecycle_status": "active"}],
+        "data_lifecycle_events": [],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.lifecycle_action(
+        user_id="user-1",
+        target_table="health_events",
+        target_id="event-1",
+        action="delete",
+        reason="No longer relevant",
+    )
+
+    assert result["completion_status"] == "complete"
+    assert result["lifecycle_status"] == "deleted"
+    update_call = next(call for call in client.calls if call[0] == "health_events" and call[1] == "update")
+    assert update_call[2]["lifecycle_status"] == "deleted"
+    assert update_call[2]["deleted_at"]
+    audit_call = next(call for call in client.calls if call[0] == "data_lifecycle_events" and call[1] == "insert")
+    assert audit_call[2]["previous_status"] == "active"
+    assert audit_call[2]["next_status"] == "deleted"
+
+
+def test_get_retention_summary_reports_all_four_completion_buckets(monkeypatch) -> None:
+    rows = {
+        "health_events": [{"lifecycle_status": "active"}, {"lifecycle_status": "archived"}],
+        "reports": [{"lifecycle_status": "deleted"}],
+        "medications": [{"lifecycle_status": "active"}],
+        "data_lifecycle_events": [
+            {"completion_status": "complete"},
+            {"completion_status": "complete"},
+            {"completion_status": "partial"},
+            {"completion_status": "blocked"},
+            {"completion_status": "unresolved"},
+        ],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    summary = db.get_retention_summary("user-1")
+
+    assert summary["active"] == 2
+    assert summary["archived"] == 1
+    assert summary["deleted"] == 1
+    assert summary["complete"] == 2
+    assert summary["partial"] == 1
+    assert summary["blocked"] == 1
+    assert summary["unresolved"] == 1
+    # blocked outranks every other completion bucket for the capability badge.
+    assert summary["capability_status"] == "blocked"
+
+
+def test_get_retention_summary_capability_status_without_blocked_or_unresolved(monkeypatch) -> None:
+    rows = {
+        "health_events": [{"lifecycle_status": "active"}],
+        "reports": [],
+        "medications": [],
+        "data_lifecycle_events": [
+            {"completion_status": "complete"},
+            {"completion_status": "partial"},
+        ],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    summary = db.get_retention_summary("user-1")
+
+    assert summary["capability_status"] == "partial"

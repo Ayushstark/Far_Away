@@ -85,6 +85,7 @@ def build_health_timeline(user_id: str, family_member_id: str | None = None) -> 
     events = _safe(lambda: db.get_recent_health_events(user_id, family_member_id, limit=10), [])
     reports = _safe(lambda: db.get_reports(user_id, family_member_id, limit=8), [])
     medications = _safe(lambda: db.get_medications(user_id, family_member_id), [])
+    lifecycle_events = _safe(lambda: db.get_lifecycle_audit(user_id, family_member_id, limit=10), [])
     items: list[dict[str, Any]] = []
 
     for event in events:
@@ -127,8 +128,21 @@ def build_health_timeline(user_id: str, family_member_id: str | None = None) -> 
             ),
         })
 
+    for event in lifecycle_events:
+        items.append({
+            "sort": event.get("created_at") or "",
+            "item": TimelineItem(
+                date=_date_label(event.get("created_at")),
+                category="lifecycle",
+                title=_lifecycle_title(event.get("target_table"), event.get("action")),
+                detail=_lifecycle_detail(event),
+                severity=None,
+                status=event.get("completion_status"),
+            ),
+        })
+
     items.sort(key=lambda entry: entry["sort"], reverse=True)
-    return [entry["item"] for entry in items[:14]]
+    return [entry["item"] for entry in items[:16]]
 
 
 def _safe(call, fallback):
@@ -173,3 +187,33 @@ def _date_label(value: Any) -> str:
 
 def _title(value: Any, fallback: str) -> str:
     return str(value or fallback).replace("_", " ").strip().title()
+
+
+_LIFECYCLE_NOUNS = {
+    "health_events": "Health event",
+    "reports": "Report",
+    "medications": "Medication",
+}
+_LIFECYCLE_VERBS = {
+    "archive": "archived",
+    "restore": "restored",
+    "delete": "deleted",
+}
+
+
+def _lifecycle_title(target_table: Any, action: Any) -> str:
+    noun = _LIFECYCLE_NOUNS.get(str(target_table), "Record")
+    verb = _LIFECYCLE_VERBS.get(str(action), str(action or "updated"))
+    return f"{noun} {verb}"
+
+
+def _lifecycle_detail(event: dict[str, Any]) -> str:
+    completion = event.get("completion_status")
+    if completion == "blocked":
+        return event.get("error_message") or "This lifecycle action was blocked."
+    if completion == "partial":
+        return event.get("error_message") or "This lifecycle action only partially completed."
+    reason = str(event.get("reason") or "").strip()
+    if reason:
+        return f"Completed. Reason noted: {reason}"
+    return "Completed and reflected in Data Control."

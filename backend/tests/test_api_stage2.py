@@ -106,6 +106,43 @@ def test_chat_loads_context_and_saves_health_event(monkeypatch) -> None:
     assert calls["memory_profile_id"] == "user-1:family:family-1"
 
 
+def test_chat_attaches_context_usage_for_healthcare_messages(monkeypatch) -> None:
+    monkeypatch.setattr(db, "get_health_history", lambda *args: "Recent headache")
+    monkeypatch.setattr(db, "get_medications", lambda *args: [{"drug_name": "Metformin"}])
+    monkeypatch.setattr(
+        db,
+        "get_context_usage",
+        lambda *args, **kwargs: {
+            "health_events_used": 3,
+            "medications_used": 2,
+            "reports_used": 1,
+            "archived_excluded": 2,
+        },
+    )
+
+    async def run(message, profile_id, health_history, current_medications, **kwargs):
+        return ChatResponse(
+            message="Track symptoms.",
+            intents=["symptom_analysis"],
+            agents_used=["emergency_detector", "symptom_analyst"],
+            results=[AgentResult(agent="symptom_analyst", summary="Track symptoms.")],
+        )
+
+    monkeypatch.setattr(api.orchestrator, "run", run)
+    monkeypatch.setattr(db, "save_health_event", lambda **kwargs: None)
+
+    response = client.post("/chat", json={"message": "Headache", "profile_id": "user-1"})
+
+    assert response.status_code == 200
+    context_used = response.json()["context_used"]
+    assert context_used == {
+        "health_events_used": 3,
+        "medications_used": 2,
+        "reports_used": 1,
+        "archived_excluded": 2,
+    }
+
+
 def test_chat_returns_response_when_event_save_temporarily_fails(monkeypatch) -> None:
     monkeypatch.setattr(db, "get_health_history", lambda *args: "Recent headache")
     monkeypatch.setattr(db, "get_medications", lambda *args: [])
@@ -366,6 +403,37 @@ def test_doctor_brief_uses_database_context(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["brief"] == "Doctor brief"
+
+
+def test_doctor_brief_include_archived_widens_status_filter(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_health_history(user_id, family_member_id=None, limit=100, *, status="active"):
+        captured["history_status"] = status
+        return "Timeline"
+
+    def fake_get_medications(user_id, family_member_id=None, *, status="active"):
+        captured["medications_status"] = status
+        return [{"drug_name": "Metformin"}]
+
+    monkeypatch.setattr(db, "get_health_history", fake_get_health_history)
+    monkeypatch.setattr(db, "get_medications", fake_get_medications)
+    monkeypatch.setattr(db, "get_profile", lambda user_id, family_member_id=None: {"id": user_id, "name": "Ramesh"})
+
+    async def brief(*args, **kwargs):
+        return "Doctor brief"
+
+    monkeypatch.setattr(api, "create_care_brief", brief)
+
+    default_response = client.get("/doctor-brief/user-1")
+    assert default_response.status_code == 200
+    assert captured["history_status"] == "active"
+    assert captured["medications_status"] == "active"
+
+    archived_response = client.get("/doctor-brief/user-1?include_archived=true")
+    assert archived_response.status_code == 200
+    assert captured["history_status"] == "all"
+    assert captured["medications_status"] == "all"
 
 
 def test_stage4_profile_reports_and_interaction_routes(monkeypatch) -> None:
