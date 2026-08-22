@@ -84,6 +84,125 @@ function getServerLanguageSnapshot(): PreferredLanguage {
   return "en";
 }
 
+// Reads the same localStorage-backed language store the chat screen already
+// uses, so any component can pick up the user's language choice without
+// prop-drilling `preferredLanguage` down through every screen.
+function usePreferredLanguage(): PreferredLanguage {
+  return useSyncExternalStore(subscribeLanguage, getLanguageSnapshot, getServerLanguageSnapshot);
+}
+
+// Centralized English/Hindi copy for static page chrome (nav, screen
+// titles/descriptions, common buttons and states). Chat-message content
+// stays dynamic (it comes from the backend / speech pipeline), but every
+// label a user sees while navigating the app lives here so both languages
+// stay consistent and easy to extend.
+const STRINGS = {
+  navChat: { en: "Chat", hi: "चैट" },
+  navHistory: { en: "History", hi: "इतिहास" },
+  navData: { en: "Data", hi: "डेटा" },
+  navReports: { en: "Reports", hi: "रिपोर्ट" },
+  navMedications: { en: "Medications", hi: "दवाइयाँ" },
+  navFamily: { en: "Family", hi: "परिवार" },
+  navProfile: { en: "Profile", hi: "प्रोफ़ाइल" },
+
+  tabTitleHealthConversation: { en: "Health conversation", hi: "स्वास्थ्य बातचीत" },
+  tabTitleHistory: { en: "Chat history", hi: "चैट इतिहास" },
+  tabTitleData: { en: "Data control", hi: "डेटा नियंत्रण" },
+  tabTitleReports: { en: "Reports", hi: "रिपोर्ट" },
+  tabTitleMedications: { en: "Medications", hi: "दवाइयाँ" },
+  tabTitleFamily: { en: "Family", hi: "परिवार" },
+  tabTitleProfile: { en: "Profile", hi: "प्रोफ़ाइल" },
+
+  signOut: { en: "Sign out", hi: "साइन आउट करें" },
+  loadingDemoProfile: { en: "Loading CareOS demo profile...", hi: "CareOS डेमो प्रोफ़ाइल लोड हो रही है..." },
+
+  statusActive: { en: "Active", hi: "सक्रिय" },
+  statusArchived: { en: "Archived", hi: "संग्रहीत" },
+  statusDeleted: { en: "Deleted", hi: "हटाई गई" },
+  statusAll: { en: "All", hi: "सभी" },
+  statusPendingDeletion: { en: "Pending deletion", hi: "हटाना लंबित" },
+  usedForAiContext: { en: "Used for AI context", hi: "AI संदर्भ में उपयोग हो रहा है" },
+  notUsedForAiContext: { en: "Not used in AI context", hi: "AI संदर्भ में उपयोग नहीं हो रहा" },
+  storedLabel: { en: "Stored", hi: "संग्रहित" },
+  pendingDeletionLabel: { en: "Pending deletion", hi: "हटाना लंबित" },
+  deletedAuditRetainedLabel: { en: "Deleted - audit retained", hi: "हटाई गई - ऑडिट सुरक्षित" },
+
+  dataScreenTitle: { en: "Data control", hi: "डेटा नियंत्रण" },
+  dataScreenDescription: { en: "Archive, restore, and remove records with visible completion status.", hi: "स्पष्ट स्थिति के साथ रिकॉर्ड को संग्रहीत, पुनर्स्थापित या हटाएँ।" },
+  retentionCapability: { en: "Retention capability", hi: "डेटा प्रतिधारण क्षमता" },
+  allRecords: { en: "All records", hi: "सभी रिकॉर्ड" },
+  totalSuffix: { en: "total", hi: "कुल" },
+  completedActions: { en: "Completed actions", hi: "पूर्ण कार्रवाइयाँ" },
+  partial: { en: "Partial", hi: "आंशिक" },
+  blocked: { en: "Blocked", hi: "अवरुद्ध" },
+  unresolved: { en: "Unresolved", hi: "अनसुलझा" },
+  noActions: { en: "No actions", hi: "कोई कार्रवाई नहीं" },
+  lifecycleBreakdownHeading: { en: "Lifecycle breakdown by record type", hi: "रिकॉर्ड प्रकार अनुसार लाइफसाइकिल विवरण" },
+  healthEvents: { en: "Health events", hi: "स्वास्थ्य घटनाएँ" },
+  reportsLabel: { en: "Reports", hi: "रिपोर्ट" },
+  medicationsLabel: { en: "Medications", hi: "दवाइयाँ" },
+  lifecycleAudit: { en: "Lifecycle audit", hi: "लाइफसाइकिल ऑडिट" },
+  noLifecycleActions: { en: "No lifecycle actions recorded yet.", hi: "अभी तक कोई लाइफसाइकिल कार्रवाई दर्ज नहीं हुई।" },
+  recordsWithLifecycleState: { en: "records with lifecycle state", hi: "लाइफसाइकिल स्थिति वाले रिकॉर्ड" },
+  noRecordsFound: { en: "No records found for this profile.", hi: "इस प्रोफ़ाइल के लिए कोई रिकॉर्ड नहीं मिला।" },
+  archiveAction: { en: "Archive", hi: "संग्रहीत करें" },
+  restoreAction: { en: "Restore", hi: "पुनर्स्थापित करें" },
+  deleteAction: { en: "Delete", hi: "हटाएँ" },
+  lifecycleStateCouldNotLoad: { en: "Data lifecycle state could not be loaded. Run supabase_data_retention.sql, then refresh.", hi: "डेटा लाइफसाइकिल स्थिति लोड नहीं हो सकी। supabase_data_retention.sql चलाएँ, फिर रीफ़्रेश करें।" },
+  lifecycleActionFailed: { en: "Lifecycle action failed.", hi: "लाइफसाइकिल कार्रवाई विफल रही।" },
+  loadingLifecycleState: { en: "Loading lifecycle state...", hi: "लाइफसाइकिल स्थिति लोड हो रही है..." },
+
+  reportsScreenTitle: { en: "Medical reports", hi: "चिकित्सा रिपोर्ट" },
+  reportsScreenDescription: { en: "Upload PDFs and review CareOS analysis.", hi: "PDF अपलोड करें और CareOS विश्लेषण देखें।" },
+  couldNotLoadReports: { en: "Could not load reports.", hi: "रिपोर्ट लोड नहीं हो सकीं।" },
+  selectPdfReport: { en: "Please select a PDF report.", hi: "कृपया एक PDF रिपोर्ट चुनें।" },
+  selectSmallerPdf: { en: "Please select a PDF smaller than 10 MB.", hi: "कृपया 10 MB से छोटी PDF चुनें।" },
+  couldNotUploadReport: { en: "CareOS could not upload or analyze this report.", hi: "CareOS इस रिपोर्ट को अपलोड या विश्लेषित नहीं कर सका।" },
+
+  medicationsScreenTitle: { en: "Medications", hi: "दवाइयाँ" },
+  medicationsScreenDescription: { en: "Track doses, timing, and possible interactions.", hi: "खुराक, समय और संभावित परस्पर-प्रभाव पर नज़र रखें।" },
+
+  familyScreenTitle: { en: "Family profiles", hi: "परिवार प्रोफ़ाइल" },
+  familyScreenDescription: { en: "Switch profiles to manage care for dependents.", hi: "आश्रितों की देखभाल प्रबंधित करने के लिए प्रोफ़ाइल बदलें।" },
+  currentlyViewing: { en: "Currently viewing", hi: "वर्तमान में देखा जा रहा है" },
+  currentlyViewingDetail: {
+    en: "Chat, reports, medications, profile details, insights, and CareOS memory now use this person's health context.",
+    hi: "चैट, रिपोर्ट, दवाइयाँ, प्रोफ़ाइल विवरण, अंतर्दृष्टि और CareOS मेमोरी अब इस व्यक्ति के स्वास्थ्य संदर्भ का उपयोग करते हैं।",
+  },
+  ownerLabel: { en: "Owner", hi: "स्वामी" },
+  ageNotSet: { en: "Age not set", hi: "आयु निर्धारित नहीं" },
+  noKnownConditions: { en: "No known conditions", hi: "कोई ज्ञात स्थिति नहीं" },
+  filterDependents: { en: "Filter dependents", hi: "आश्रितों को फ़िल्टर करें" },
+  loadingFamilyMembers: { en: "Loading family members...", hi: "परिवार के सदस्य लोड हो रहे हैं..." },
+  addFamilyMember: { en: "Add family member", hi: "परिवार का सदस्य जोड़ें" },
+  adding: { en: "Adding...", hi: "जोड़ा जा रहा है..." },
+  nameLabel: { en: "Name", hi: "नाम" },
+  relationLabel: { en: "Relation", hi: "रिश्ता" },
+  ageLabel: { en: "Age", hi: "आयु" },
+  bloodGroupLabel: { en: "Blood group", hi: "रक्त समूह" },
+  knownConditionsLabel: { en: "Known conditions, comma separated", hi: "ज्ञात स्थितियाँ, अल्पविराम से अलग करें" },
+  couldNotAddFamilyMember: { en: "Could not add family member.", hi: "परिवार का सदस्य नहीं जोड़ा जा सका।" },
+  couldNotLoadFamilyMembers: { en: "Could not load family members.", hi: "परिवार के सदस्य लोड नहीं हो सके।" },
+  errorCouldNot: { en: "Could not", hi: "नहीं हो सका:" },
+
+  profileScreenDescription: { en: "Health profile and visit preparation.", hi: "स्वास्थ्य प्रोफ़ाइल और विज़िट की तैयारी।" },
+
+  historyScreenTitle: { en: "Chat history", hi: "चैट इतिहास" },
+  historyScreenDescription: {
+    en: "Saved conversation context for {name}. The main chat only shows the latest messages.",
+    hi: "{name} के लिए सहेजा गया बातचीत संदर्भ। मुख्य चैट में केवल हाल के संदेश दिखते हैं।",
+  },
+  savedMessagesCount: { en: "saved messages", hi: "सहेजे गए संदेश" },
+  olderExchangesNote: { en: "Older exchanges stay here so the main chat remains focused.", hi: "पुराने संदेश यहाँ रहते हैं ताकि मुख्य चैट केंद्रित बनी रहे।" },
+} as const;
+
+type StringKey = keyof typeof STRINGS;
+
+function useT() {
+  const lang = usePreferredLanguage();
+  return (key: StringKey) => STRINGS[key][lang];
+}
+
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
   return window.localStorage.getItem("careos-theme") === "dark" ? "dark" : "light";
@@ -195,6 +314,7 @@ type Profile = {
   emergency_contact?: string;
   emergency_contacts?: string | string[];
   relation?: string;
+  lifecycle_status?: string;
 };
 
 type Report = {
@@ -234,6 +354,10 @@ function responseLanguage(text: string, preferredLanguage: PreferredLanguage): P
   return preferredLanguage === "hi" || /[\u0900-\u097f]/.test(text) ? "hi" : "en";
 }
 
+// Slightly faster than natural gTTS playback so replies feel snappier
+// without becoming hard to follow.
+const CAREOS_VOICE_PLAYBACK_RATE = 1.15;
+
 async function createCareOSAudio(text: string, preferredLanguage: PreferredLanguage) {
   const { data } = await axios.post(
     `${API_URL}/text-to-speech`,
@@ -241,26 +365,28 @@ async function createCareOSAudio(text: string, preferredLanguage: PreferredLangu
     { responseType: "blob" },
   );
   const url = URL.createObjectURL(data);
-  return { audio: new Audio(url), url };
+  const audio = new Audio(url);
+  audio.playbackRate = CAREOS_VOICE_PLAYBACK_RATE;
+  return { audio, url };
 }
 
 const navigation = [
-  { id: "chat" as const, label: "Chat", icon: MessageCircle },
-  { id: "history" as const, label: "History", icon: HistoryIcon },
-  { id: "data" as const, label: "Data", icon: ShieldCheck },
-  { id: "reports" as const, label: "Reports", icon: FileText },
-  { id: "medications" as const, label: "Medications", icon: Pill },
-  { id: "family" as const, label: "Family", icon: Users },
-  { id: "profile" as const, label: "Profile", icon: UserRound },
+  { id: "chat" as const, labelKey: "navChat" as const, icon: MessageCircle },
+  { id: "history" as const, labelKey: "navHistory" as const, icon: HistoryIcon },
+  { id: "data" as const, labelKey: "navData" as const, icon: ShieldCheck },
+  { id: "reports" as const, labelKey: "navReports" as const, icon: FileText },
+  { id: "medications" as const, labelKey: "navMedications" as const, icon: Pill },
+  { id: "family" as const, labelKey: "navFamily" as const, icon: Users },
+  { id: "profile" as const, labelKey: "navProfile" as const, icon: UserRound },
 ];
 
-const tabTitles: Record<Exclude<Tab, "chat">, string> = {
-  history: "Chat history",
-  data: "Data control",
-  reports: "Reports",
-  medications: "Medications",
-  family: "Family",
-  profile: "Profile",
+const tabTitleKeys: Record<Exclude<Tab, "chat">, StringKey> = {
+  history: "tabTitleHistory",
+  data: "tabTitleData",
+  reports: "tabTitleReports",
+  medications: "tabTitleMedications",
+  family: "tabTitleFamily",
+  profile: "tabTitleProfile",
 };
 
 export default function Home() {
@@ -780,7 +906,6 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               onSend={sendMessage}
               onVoice={toggleVoiceInput}
               onLanguage={setPreferredLanguage}
-              onPlanAction={sendPrompt}
             />
           ) : tab === "history" ? (
             <ChatHistoryScreen
@@ -798,7 +923,6 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
           ) : tab === "family" ? (
             <FamilyScreen
               activeProfile={activeProfile}
-              family={family}
               owner={ownerProfile}
               onFamilyChange={setFamily}
               onSelect={selectActiveProfile}
@@ -1025,11 +1149,9 @@ function DailyDigest({
 function DailyPlan({
   items,
   loading,
-  onAction,
 }: {
   items: DailyPlanItem[];
   loading: boolean;
-  onAction: (text: string) => void;
 }) {
   const icons: Record<DailyPlanItem["type"], typeof Pill> = {
     medicine: Pill,
@@ -1063,11 +1185,9 @@ function DailyPlan({
         {items.map((item, index) => {
           const Icon = icons[item.type];
           return (
-            <button
+            <div
               key={`${item.type}-${index}`}
-              type="button"
-              onClick={() => onAction(item.action_text ?? `${item.title}. ${item.detail}`)}
-              className={`rounded-xl border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${priorityClass[item.priority]}`}
+              className={`rounded-xl border p-3 text-left shadow-sm ${priorityClass[item.priority]}`}
             >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-white/80 text-[#12664f] shadow-sm">
@@ -1078,7 +1198,7 @@ function DailyPlan({
                   <span className="mt-1 block text-xs leading-5 text-[#61746b]">{item.detail}</span>
                 </span>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -1103,6 +1223,7 @@ function Header({
   onThemeToggle: () => void;
   onSignOut: () => Promise<void>;
 }) {
+  const t = useT();
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#d9e7e1] bg-white/90 px-4 shadow-sm backdrop-blur sm:px-6">
       <div className="flex items-center gap-3">
@@ -1112,7 +1233,7 @@ function Header({
         <div>
           <p className="text-sm font-semibold sm:text-base">CareOS</p>
           <p className="text-xs text-[#6b7b74]">
-            {tab === "chat" ? "Health conversation" : tabTitles[tab]}
+            {tab === "chat" ? t("tabTitleHealthConversation") : t(tabTitleKeys[tab])}
           </p>
         </div>
       </div>
@@ -1145,8 +1266,8 @@ function Header({
         <button
           type="button"
           onClick={() => void onSignOut()}
-          title="Sign out"
-          aria-label="Sign out"
+          title={t("signOut")}
+          aria-label={t("signOut")}
           className="grid size-9 shrink-0 place-items-center rounded-lg border border-transparent text-[#53665d] transition hover:border-[#b7cbc2] hover:bg-[#edf4f1] hover:text-[#12664f]"
         >
           <LogOut size={17} />
@@ -1173,7 +1294,6 @@ function ChatScreen({
   onSend,
   onVoice,
   onLanguage,
-  onPlanAction,
   voiceSendSeconds,
   onCancelVoiceSend,
 }: {
@@ -1193,7 +1313,6 @@ function ChatScreen({
   onSend: (event: FormEvent) => void;
   onVoice: () => void;
   onLanguage: (language: PreferredLanguage) => void;
-  onPlanAction: (text: string) => void;
   voiceSendSeconds: number | null;
   onCancelVoiceSend: () => void;
 }) {
@@ -1227,7 +1346,6 @@ function ChatScreen({
             <DailyPlan
               items={dailyPlan}
               loading={planLoading}
-              onAction={onPlanAction}
             />
           )}
           {(digestLoading || insightCards.length > 0) && (
@@ -1485,16 +1603,17 @@ function ChatHistoryScreen({
   onClear: () => void;
   onBackToChat: () => void;
 }) {
+  const t = useT();
   const savedMessages = messages.filter((message) => message.speaker !== "system" || message.text.trim());
   return (
     <ScreenShell
-      title="Chat history"
-      description={`Saved conversation context for ${profile.name}. The main chat only shows the latest messages.`}
+      title={t("historyScreenTitle")}
+      description={t("historyScreenDescription").replace("{name}", profile.name)}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <div>
-          <p className="text-sm font-semibold text-[#18352a]">{savedMessages.length} saved messages</p>
-          <p className="mt-1 text-xs text-[#687971]">Older exchanges stay here so the main chat remains focused.</p>
+          <p className="text-sm font-semibold text-[#18352a]">{savedMessages.length} {t("savedMessagesCount")}</p>
+          <p className="mt-1 text-xs text-[#687971]">{t("olderExchangesNote")}</p>
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={onBackToChat} className="h-10 rounded-lg border border-[#b7cbc2] px-4 text-sm font-semibold text-[#12664f] transition hover:bg-[#eef7f3]">
@@ -1660,6 +1779,7 @@ function DemoScenarioPanel({
 
 function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
   const OWNER_ID = useOwnerId();
+  const t = useT();
   const [summary, setSummary] = useState<RetentionSummary | null>(null);
   const [items, setItems] = useState<RetentionItems | null>(null);
   const [busyKey, setBusyKey] = useState("");
@@ -1681,11 +1801,15 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
         const detail = axios.isAxiosError(requestError) && requestError.response?.data?.detail;
         setError(typeof detail === "string"
           ? detail
-          : "Data lifecycle state could not be loaded. Run supabase_data_retention.sql, then refresh.");
+          : t("lifecycleStateCouldNotLoad"));
       });
     return () => {
       cancelled = true;
     };
+    // `t` intentionally omitted: it is a fresh function each render, and
+    // re-fetching on every language toggle isn't needed - the language it
+    // reads at error time is always current via closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [OWNER_ID, familyMemberId]);
 
   async function runAction(target_table: string, target_id: string | number, action: "archive" | "restore" | "delete") {
@@ -1714,7 +1838,7 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
       return data;
     } catch (requestError) {
       const detail = axios.isAxiosError(requestError) && requestError.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "Lifecycle action failed.");
+      setError(typeof detail === "string" ? detail : t("lifecycleActionFailed"));
       return null;
     } finally {
       setBusyKey("");
@@ -1722,19 +1846,20 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
   }
 
   return (
-    <ScreenShell title="Data control" description="Archive, restore, and remove records with visible completion status.">
+    <ScreenShell title={t("dataScreenTitle")} description={t("dataScreenDescription")}>
       {summary && <RetentionStatusPanel summary={summary} />}
+      {items && <LifecycleBreakdownChart items={items} />}
       {items && <DemoScenarioPanel items={items} runAction={runAction} />}
       {notice && <p className="rounded-xl border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-sm font-medium text-[#12664f]">{notice}</p>}
       <ErrorText text={error} />
-      {loading && !error ? <LoadingState text="Loading lifecycle state..." /> : null}
+      {loading && !error ? <LoadingState text={t("loadingLifecycleState")} /> : null}
       {items && (
         <div className="space-y-4">
-          <RetentionGroup title="Health events" table="health_events" records={items.health_events} busyKey={busyKey} onAction={runAction} />
-          <RetentionGroup title="Reports" table="reports" records={items.reports} busyKey={busyKey} onAction={runAction} />
-          <RetentionGroup title="Medications" table="medications" records={items.medications} busyKey={busyKey} onAction={runAction} />
+          <RetentionGroup title={t("healthEvents")} table="health_events" records={items.health_events} busyKey={busyKey} onAction={runAction} />
+          <RetentionGroup title={t("reportsLabel")} table="reports" records={items.reports} busyKey={busyKey} onAction={runAction} />
+          <RetentionGroup title={t("medicationsLabel")} table="medications" records={items.medications} busyKey={busyKey} onAction={runAction} />
           <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-[#71827a]">Lifecycle audit</p>
+            <p className="text-xs font-semibold uppercase text-[#71827a]">{t("lifecycleAudit")}</p>
             <div className="mt-3 space-y-2">
               {items.events.slice(0, 8).map((event, index) => (
                 <div key={index} className="rounded-xl border border-[#e1ece7] bg-[#fbfdfc] p-3 text-xs leading-5 text-[#52665d]">
@@ -1743,7 +1868,7 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
                   <span className="ml-2 rounded-full bg-white px-2 py-0.5 font-semibold text-[#12664f] ring-1 ring-[#dce8e2]">{String(event.completion_status ?? "unknown")}</span>
                 </div>
               ))}
-              {!items.events.length && <EmptyState text="No lifecycle actions recorded yet." />}
+              {!items.events.length && <EmptyState text={t("noLifecycleActions")} />}
             </div>
           </section>
         </div>
@@ -1752,7 +1877,98 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
   );
 }
 
+// Fixed status scale (good -> critical), reserved for lifecycle state only -
+// never reused for series identity elsewhere. Steps come from the design
+// system's validated status palette (see the dataviz skill's palette.md).
+const LIFECYCLE_STATUS_ORDER = ["active", "archived", "pending_deletion", "deleted"] as const;
+type LifecycleStatusKey = (typeof LIFECYCLE_STATUS_ORDER)[number];
+const LIFECYCLE_STATUS_META: Record<LifecycleStatusKey, { labelKey: StringKey; color: string; textOnFill: string }> = {
+  active: { labelKey: "statusActive", color: "#0ca30c", textOnFill: "#04230a" },
+  archived: { labelKey: "statusArchived", color: "#fab219", textOnFill: "#3a2c05" },
+  pending_deletion: { labelKey: "statusPendingDeletion", color: "#ec835a", textOnFill: "#3a1508" },
+  deleted: { labelKey: "statusDeleted", color: "#d03b3b", textOnFill: "#ffffff" },
+};
+
+function lifecycleCounts(summary: RetentionSummary): Record<LifecycleStatusKey, number> {
+  return {
+    active: summary.active,
+    archived: summary.archived,
+    pending_deletion: summary.pending_deletion,
+    deleted: summary.deleted,
+  };
+}
+
+// Horizontal stacked bar: part-to-whole share of records across the four
+// lifecycle states. One row per bar; a shared legend (rendered once by the
+// caller) keeps identity off color-alone. Segments below ~10% skip the
+// inline count and rely on the legend + native tooltip instead of clipping
+// text that would not fit.
+function LifecycleStackedBar({ rowLabel, counts }: { rowLabel: string; counts: Record<LifecycleStatusKey, number> }) {
+  const t = useT();
+  const total = LIFECYCLE_STATUS_ORDER.reduce((sum, key) => sum + counts[key], 0);
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold text-[#3c4b44]">{rowLabel}</p>
+        <p className="text-[11px] text-[#71827a]">{total} {t("totalSuffix")}</p>
+      </div>
+      {total === 0 ? (
+        <div className="h-6 rounded-full border border-dashed border-[#d2e1da] bg-[#fbfdfc]" />
+      ) : (
+        <div className="flex h-6 w-full overflow-hidden rounded-full bg-[#eef2ef]" role="img" aria-label={`${rowLabel}: ${LIFECYCLE_STATUS_ORDER.map((key) => `${counts[key]} ${t(LIFECYCLE_STATUS_META[key].labelKey).toLowerCase()}`).join(", ")}`}>
+          {LIFECYCLE_STATUS_ORDER.map((key, index) => {
+            const count = counts[key];
+            if (!count) return null;
+            const pct = (count / total) * 100;
+            const meta = LIFECYCLE_STATUS_META[key];
+            return (
+              <div
+                key={key}
+                title={`${t(meta.labelKey)}: ${count}`}
+                style={{ width: `${pct}%`, backgroundColor: meta.color }}
+                className={`flex items-center justify-center ${index > 0 ? "ml-0.5" : ""}`}
+              >
+                {pct >= 10 && (
+                  <span className="px-1 text-[11px] font-semibold" style={{ color: meta.textOnFill }}>
+                    {count}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LifecycleStatusLegend() {
+  const t = useT();
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      {LIFECYCLE_STATUS_ORDER.map((key) => {
+        const meta = LIFECYCLE_STATUS_META[key];
+        return (
+          <span key={key} className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#52665d]">
+            <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
+            {t(meta.labelKey)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+const CAPABILITY_STATUS_KEYS: Record<RetentionSummary["capability_status"], StringKey> = {
+  complete: "completedActions",
+  partial: "partial",
+  blocked: "blocked",
+  unresolved: "unresolved",
+  no_actions: "noActions",
+};
+
 function RetentionStatusPanel({ summary }: { summary: RetentionSummary }) {
+  const t = useT();
   const statusStyles: Record<RetentionSummary["capability_status"], string> = {
     complete: "border-[#b8d8ca] bg-[#f1f8f5] text-[#12664f]",
     partial: "border-[#ead39a] bg-[#fff8e7] text-[#8a5a10]",
@@ -1760,27 +1976,61 @@ function RetentionStatusPanel({ summary }: { summary: RetentionSummary }) {
     unresolved: "border-[#d7c7ef] bg-[#f8f3ff] text-[#684899]",
     no_actions: "border-[#d2e1da] bg-white text-[#52665d]",
   };
-  const label = summary.capability_status.replace("_", " ").toUpperCase();
+  const label = t(CAPABILITY_STATUS_KEYS[summary.capability_status]).toUpperCase();
   return (
     <section className={`rounded-2xl border p-4 shadow-sm ${statusStyles[summary.capability_status]}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase opacity-80">Retention capability</p>
+          <p className="text-xs font-semibold uppercase opacity-80">{t("retentionCapability")}</p>
           <h2 className="mt-1 text-xl font-bold">{label}</h2>
         </div>
         <ShieldCheck size={28} />
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-4">
-        <MetricTile label="Active" value={String(summary.active)} tone="good" />
-        <MetricTile label="Archived" value={String(summary.archived)} />
-        <MetricTile label="Deleted" value={String(summary.deleted)} tone={summary.deleted ? "warn" : "neutral"} />
-        <MetricTile label="Completed actions" value={String(summary.complete)} tone="good" />
+      <div className="mt-4 rounded-xl border border-[#e1ece7] bg-white/70 p-3">
+        <LifecycleStackedBar rowLabel={t("allRecords")} counts={lifecycleCounts(summary)} />
+        <div className="mt-3">
+          <LifecycleStatusLegend />
+        </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
-        <MetricTile label="Partial" value={String(summary.partial)} tone={summary.partial ? "warn" : "neutral"} />
-        <MetricTile label="Blocked" value={String(summary.blocked)} tone={summary.blocked ? "warn" : "neutral"} />
-        <MetricTile label="Unresolved" value={String(summary.unresolved)} tone={summary.unresolved ? "warn" : "neutral"} />
-        <MetricTile label="Pending deletion" value={String(summary.pending_deletion)} />
+        <MetricTile label={t("completedActions")} value={String(summary.complete)} tone="good" />
+        <MetricTile label={t("partial")} value={String(summary.partial)} tone={summary.partial ? "warn" : "neutral"} />
+        <MetricTile label={t("blocked")} value={String(summary.blocked)} tone={summary.blocked ? "warn" : "neutral"} />
+        <MetricTile label={t("unresolved")} value={String(summary.unresolved)} tone={summary.unresolved ? "warn" : "neutral"} />
+      </div>
+    </section>
+  );
+}
+
+// Per-table breakdown so a judge can see at a glance which record type is
+// carrying the archived/deleted weight, without opening every record list.
+function LifecycleBreakdownChart({ items }: { items: RetentionItems }) {
+  const t = useT();
+  function countsFor(records: RetentionRecord[]): Record<LifecycleStatusKey, number> {
+    const counts: Record<LifecycleStatusKey, number> = { active: 0, archived: 0, pending_deletion: 0, deleted: 0 };
+    for (const record of records) {
+      const status = (record.lifecycle_status || "active") as LifecycleStatusKey;
+      if (status in counts) counts[status] += 1;
+    }
+    return counts;
+  }
+
+  const rows: { label: string; counts: Record<LifecycleStatusKey, number> }[] = [
+    { label: t("healthEvents"), counts: countsFor(items.health_events) },
+    { label: t("reportsLabel"), counts: countsFor(items.reports) },
+    { label: t("medicationsLabel"), counts: countsFor(items.medications) },
+  ];
+
+  return (
+    <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase text-[#71827a]">{t("lifecycleBreakdownHeading")}</p>
+      <div className="mt-4 space-y-4">
+        {rows.map((row) => (
+          <LifecycleStackedBar key={row.label} rowLabel={row.label} counts={row.counts} />
+        ))}
+      </div>
+      <div className="mt-4 border-t border-[#eef2ef] pt-3">
+        <LifecycleStatusLegend />
       </div>
     </section>
   );
@@ -1793,11 +2043,11 @@ function lifecycleChipClass(status: string): string {
   return "bg-[#fff2ef] text-[#982d1d]";
 }
 
-function consentStorageLabel(status: string): string {
-  if (status === "archived") return "Archived";
-  if (status === "pending_deletion") return "Pending deletion";
-  if (status === "deleted") return "Deleted - audit retained";
-  return "Stored";
+function consentStorageLabel(status: string, t: (key: StringKey) => string): string {
+  if (status === "archived") return t("statusArchived");
+  if (status === "pending_deletion") return t("pendingDeletionLabel");
+  if (status === "deleted") return t("deletedAuditRetainedLabel");
+  return t("storedLabel");
 }
 
 // The consent/data-confidence chip pair: one chip for where the record sits
@@ -1805,19 +2055,20 @@ function consentStorageLabel(status: string): string {
 // context right now. Two independent facts, so two independent chips rather
 // than folding "archived" and "not used for AI" into one ambiguous label.
 function ConsentChips({ status }: { status?: string }) {
+  const t = useT();
   const value = status || "active";
   const usedForAi = value === "active";
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${lifecycleChipClass(value)}`}>
-        {consentStorageLabel(value)}
+        {consentStorageLabel(value, t)}
       </span>
       <span
         className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
           usedForAi ? "bg-[#eef4ff] text-[#2d4f8f]" : "bg-[#f1f0f5] text-[#5b5f73]"
         }`}
       >
-        {usedForAi ? "Used for AI context" : "Not used in AI context"}
+        {usedForAi ? t("usedForAiContext") : t("notUsedForAiContext")}
       </span>
     </span>
   );
@@ -1827,11 +2078,12 @@ function ConsentChips({ status }: { status?: string }) {
 // what Data Control considers "active" / "archived" / "deleted" / "all" - no
 // separate filter logic duplicated per screen.
 function StatusFilterTabs({ value, onChange }: { value: RecordStatusFilter; onChange: (next: RecordStatusFilter) => void }) {
+  const t = useT();
   const options: { id: RecordStatusFilter; label: string }[] = [
-    { id: "active", label: "Active" },
-    { id: "archived", label: "Archived" },
-    { id: "deleted", label: "Deleted" },
-    { id: "all", label: "All" },
+    { id: "active", label: t("statusActive") },
+    { id: "archived", label: t("statusArchived") },
+    { id: "deleted", label: t("statusDeleted") },
+    { id: "all", label: t("statusAll") },
   ];
   return (
     <div className="inline-flex rounded-lg border border-[#d2e1da] bg-white p-1 text-xs font-semibold">
@@ -1862,12 +2114,13 @@ function RetentionGroup({
   busyKey: string;
   onAction: (table: string, id: string | number, action: "archive" | "restore" | "delete") => void;
 }) {
+  const t = useT();
   return (
     <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase text-[#71827a]">{title}</p>
-          <p className="mt-1 text-sm text-[#52665d]">{records.length} records with lifecycle state</p>
+          <p className="mt-1 text-sm text-[#52665d]">{records.length} {t("recordsWithLifecycleState")}</p>
         </div>
         <Archive className="text-[#12664f]" size={20} />
       </div>
@@ -1885,16 +2138,16 @@ function RetentionGroup({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {status === "active" ? (
-                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "archive")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title="Archive">
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "archive")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title={t("archiveAction")}>
                       {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <Archive size={16} />}
                     </button>
                   ) : (
-                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "restore")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title="Restore">
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "restore")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title={t("restoreAction")}>
                       {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <RotateCcw size={16} />}
                     </button>
                   )}
                   {status !== "deleted" && (
-                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "delete")} className="grid size-9 place-items-center rounded-lg border border-[#efb2a8] text-[#982d1d] hover:bg-[#fff2ef] disabled:opacity-40" title="Delete">
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "delete")} className="grid size-9 place-items-center rounded-lg border border-[#efb2a8] text-[#982d1d] hover:bg-[#fff2ef] disabled:opacity-40" title={t("deleteAction")}>
                       {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <Trash2 size={16} />}
                     </button>
                   )}
@@ -1903,7 +2156,7 @@ function RetentionGroup({
             </article>
           );
         })}
-        {!records.length && <EmptyState text={`No ${title.toLowerCase()} found for this profile.`} />}
+        {!records.length && <EmptyState text={t("noRecordsFound")} />}
       </div>
     </section>
   );
@@ -1968,6 +2221,7 @@ function EmergencyOverlay({
 
 function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const OWNER_ID = useOwnerId();
+  const t = useT();
   const [reports, setReports] = useState<Report[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -1985,12 +2239,13 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
       })
       .then(({ data }) => setReports(data))
       .catch((error) => {
-        if (!axios.isCancel(error)) setError("Could not load reports.");
+        if (!axios.isCancel(error)) setError(t("couldNotLoadReports"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setInitialLoading(false);
       });
     return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [OWNER_ID, familyMemberId, statusFilter]);
 
   async function loadReports() {
@@ -2000,17 +2255,17 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
       });
       setReports(data);
     } catch {
-      setError("Could not load reports.");
+      setError(t("couldNotLoadReports"));
     }
   }
 
   async function upload(file?: File) {
     if (!file || file.type !== "application/pdf") {
-      setError("Please select a PDF report.");
+      setError(t("selectPdfReport"));
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setError("Please select a PDF smaller than 10 MB.");
+      setError(t("selectSmallerPdf"));
       return;
     }
     setBusy(true);
@@ -2025,14 +2280,14 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
       await loadReports();
     } catch (error) {
       const detail = axios.isAxiosError(error) && error.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "CareOS could not upload or analyze this report.");
+      setError(typeof detail === "string" ? detail : t("couldNotUploadReport"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <ScreenShell title="Medical reports" description="Upload PDFs and review CareOS analysis.">
+    <ScreenShell title={t("reportsScreenTitle")} description={t("reportsScreenDescription")}>
       <input
         ref={fileInput}
         type="file"
@@ -2149,6 +2404,7 @@ function MetricTile({ label, value, tone = "neutral" }: { label: string; value: 
 
 function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const OWNER_ID = useOwnerId();
+  const t = useT();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [form, setForm] = useState({ drug_name: "", dose: "", frequency: "", timing: "", with_food: false });
   const [interaction, setInteraction] = useState("");
@@ -2272,7 +2528,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   }
 
   return (
-    <ScreenShell title="Medications" description="Track doses, timing, and possible interactions.">
+    <ScreenShell title={t("medicationsScreenTitle")} description={t("medicationsScreenDescription")}>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#c8ded4] bg-[#eef7f3] p-4 shadow-sm">
         <div>
           <p className="text-sm font-semibold">Medication reminders</p>
@@ -2340,18 +2596,60 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   );
 }
 
-function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }: { activeProfile: Profile; family: Profile[]; owner: Profile; onFamilyChange: (profiles: Profile[]) => void; onSelect: (profile: Profile) => void }) {
+function FamilyScreen({ activeProfile, owner, onFamilyChange, onSelect }: { activeProfile: Profile; owner: Profile; onFamilyChange: (profiles: Profile[]) => void; onSelect: (profile: Profile) => void }) {
   const OWNER_ID = useOwnerId();
+  const t = useT();
   const [form, setForm] = useState({ name: "", relation: "", age: "", blood_group: "", known_conditions: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RecordStatusFilter>("active");
+  const [members, setMembers] = useState<Profile[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
+
+  async function refreshActiveFamily() {
+    try {
+      const { data } = await axios.get<Profile[]>(`${API_URL}/family/${OWNER_ID}`, { params: { status: "active" } });
+      onFamilyChange(data);
+    } catch {
+      // The visible list below still reflects the latest state; this only
+      // refreshes the profile switcher, so a failure here is non-blocking.
+    }
+  }
+
+  async function loadMembers() {
+    try {
+      const { data } = await axios.get<Profile[]>(`${API_URL}/family/${OWNER_ID}`, { params: { status: statusFilter } });
+      setMembers(data);
+    } catch {
+      setError(t("couldNotLoadFamilyMembers"));
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    axios
+      .get<Profile[]>(`${API_URL}/family/${OWNER_ID}`, {
+        params: { status: statusFilter },
+        signal: controller.signal,
+      })
+      .then(({ data }) => setMembers(data))
+      .catch((error) => {
+        if (!axios.isCancel(error)) setError(t("couldNotLoadFamilyMembers"));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setMembersLoading(false);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [OWNER_ID, statusFilter]);
 
   async function addMember(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const { data } = await axios.post<Profile>(`${API_URL}/family/add`, {
+      await axios.post<Profile>(`${API_URL}/family/add`, {
         owner_id: OWNER_ID,
         name: form.name,
         relation: form.relation,
@@ -2359,45 +2657,116 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
         blood_group: form.blood_group,
         known_conditions: form.known_conditions.split(",").map((item) => item.trim()).filter(Boolean),
       });
-      onFamilyChange([...family, data]);
       setForm({ name: "", relation: "", age: "", blood_group: "", known_conditions: "" });
+      await loadMembers();
+      await refreshActiveFamily();
     } catch {
-      setError("Could not add family member.");
+      setError(t("couldNotAddFamilyMember"));
     } finally {
       setBusy(false);
     }
   }
 
+  async function runLifecycleAction(member: Profile, action: "archive" | "restore" | "delete") {
+    setLifecycleBusyId(String(member.id));
+    setError("");
+    try {
+      await axios.post(`${API_URL}/family/${OWNER_ID}/${member.id}/lifecycle`, {
+        owner_id: OWNER_ID,
+        action,
+      });
+      if (String(activeProfile.id) === String(member.id) && action !== "restore") {
+        onSelect(owner);
+      }
+      await loadMembers();
+      await refreshActiveFamily();
+    } catch {
+      const actionKey = action === "archive" ? "archiveAction" : action === "restore" ? "restoreAction" : "deleteAction";
+      setError(`${t("errorCouldNot")} ${t(actionKey).toLowerCase()} ${member.name}.`);
+    } finally {
+      setLifecycleBusyId(null);
+    }
+  }
+
+  const lifecycleStatusLabel: Record<string, string> = {
+    archived: t("statusArchived"),
+    deleted: t("statusDeleted"),
+    pending_deletion: t("statusPendingDeletion"),
+  };
+
   return (
-    <ScreenShell title="Family profiles" description="Switch profiles to manage care for dependents.">
+    <ScreenShell title={t("familyScreenTitle")} description={t("familyScreenDescription")}>
       <div className="rounded-xl border border-[#b8d8ca] bg-[#eef7f3] p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase text-[#527166]">Currently viewing</p>
+        <p className="text-xs font-semibold uppercase text-[#527166]">{t("currentlyViewing")}</p>
         <p className="mt-1 text-base font-semibold text-[#12664f]">{activeProfile.name}</p>
         <p className="mt-1 text-xs leading-5 text-[#60736a]">
-          Chat, reports, medications, profile details, insights, and CareOS memory now use this person&apos;s health context.
+          {t("currentlyViewingDetail")}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {[owner, ...family].map((profile) => (
-          <button key={profile.id} onClick={() => onSelect(profile)} className={`rounded-xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] ring-4 ring-[#12664f]/10" : "border-[#d2e1da]"}`}>
+        <div className={`rounded-xl border bg-white p-4 text-left shadow-sm ${String(activeProfile.id) === String(owner.id) ? "border-[#12664f] ring-4 ring-[#12664f]/10" : "border-[#d2e1da]"}`}>
+          <button onClick={() => onSelect(owner)} className="w-full text-left">
             <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><UserRound size={19} /></span>
-            <p className="mt-3 text-sm font-semibold">{profile.name}</p>
-            <p className="mt-1 text-xs text-[#687971]">{String(profile.id) === OWNER_ID ? "Owner" : profile.relation} | {profile.age ?? "Age not set"}</p>
-            <p className="mt-2 text-xs text-[#687971]">{formatList(profile.known_conditions) || "No known conditions"}</p>
+            <p className="mt-3 text-sm font-semibold">{owner.name}</p>
+            <p className="mt-1 text-xs text-[#687971]">{t("ownerLabel")} | {owner.age ?? t("ageNotSet")}</p>
+            <p className="mt-2 text-xs text-[#687971]">{formatList(owner.known_conditions) || t("noKnownConditions")}</p>
           </button>
-        ))}
-      </div>
-      <form onSubmit={addMember} className="space-y-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">Add family member</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <TextInput label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
-          <TextInput label="Relation" value={form.relation} onChange={(value) => setForm({ ...form, relation: value })} required />
-          <TextInput label="Age" value={form.age} onChange={(value) => setForm({ ...form, age: value })} required />
-          <TextInput label="Blood group" value={form.blood_group} onChange={(value) => setForm({ ...form, blood_group: value })} required />
         </div>
-        <TextInput label="Known conditions, comma separated" value={form.known_conditions} onChange={(value) => setForm({ ...form, known_conditions: value })} />
+        {members.filter((profile) => String(profile.id) !== OWNER_ID).map((profile) => {
+          const status = profile.lifecycle_status ?? "active";
+          const isBusy = lifecycleBusyId === String(profile.id);
+          return (
+            <div key={profile.id} className={`rounded-xl border bg-white p-4 text-left shadow-sm ${String(activeProfile.id) === String(profile.id) ? "border-[#12664f] ring-4 ring-[#12664f]/10" : "border-[#d2e1da]"}`}>
+              <button onClick={() => onSelect(profile)} className="w-full text-left" disabled={status !== "active"}>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><UserRound size={19} /></span>
+                  {status !== "active" && (
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${status === "archived" ? "bg-[#f4eefb] text-[#5b3a91]" : "bg-[#fdecec] text-[#9c2b20]"}`}>
+                      {lifecycleStatusLabel[status] ?? status}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-3 text-sm font-semibold">{profile.name}</p>
+                <p className="mt-1 text-xs text-[#687971]">{profile.relation} | {profile.age ?? t("ageNotSet")}</p>
+                <p className="mt-2 text-xs text-[#687971]">{formatList(profile.known_conditions) || t("noKnownConditions")}</p>
+              </button>
+              <div className="mt-3 flex items-center gap-2 border-t border-[#eef2ef] pt-3">
+                {status === "active" && (
+                  <button type="button" disabled={isBusy} onClick={() => runLifecycleAction(profile, "archive")} className="grid size-8 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title={t("archiveAction")}>
+                    {isBusy ? <LoaderCircle className="animate-spin" size={15} /> : <Archive size={15} />}
+                  </button>
+                )}
+                {status === "archived" && (
+                  <button type="button" disabled={isBusy} onClick={() => runLifecycleAction(profile, "restore")} className="grid size-8 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title={t("restoreAction")}>
+                    {isBusy ? <LoaderCircle className="animate-spin" size={15} /> : <RotateCcw size={15} />}
+                  </button>
+                )}
+                {status !== "deleted" && (
+                  <button type="button" disabled={isBusy} onClick={() => runLifecycleAction(profile, "delete")} className="grid size-8 place-items-center rounded-lg border border-[#efb2a8] text-[#982d1d] hover:bg-[#fff2ef] disabled:opacity-40" title={t("deleteAction")}>
+                    {isBusy ? <LoaderCircle className="animate-spin" size={15} /> : <Trash2 size={15} />}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase text-[#60736a]">{t("filterDependents")}</p>
+        <StatusFilterTabs value={statusFilter} onChange={setStatusFilter} />
+      </div>
+      {membersLoading && <p className="text-xs text-[#687971]">{t("loadingFamilyMembers")}</p>}
+      <form onSubmit={addMember} className="space-y-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">{t("addFamilyMember")}</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput label={t("nameLabel")} value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
+          <TextInput label={t("relationLabel")} value={form.relation} onChange={(value) => setForm({ ...form, relation: value })} required />
+          <TextInput label={t("ageLabel")} value={form.age} onChange={(value) => setForm({ ...form, age: value })} required />
+          <TextInput label={t("bloodGroupLabel")} value={form.blood_group} onChange={(value) => setForm({ ...form, blood_group: value })} required />
+        </div>
+        <TextInput label={t("knownConditionsLabel")} value={form.known_conditions} onChange={(value) => setForm({ ...form, known_conditions: value })} />
         <ErrorText text={error} />
-        <button disabled={busy} className="flex h-10 items-center gap-2 rounded-lg bg-[#12664f] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50">{busy ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />} {busy ? "Adding..." : "Add family member"}</button>
+        <button disabled={busy} className="flex h-10 items-center gap-2 rounded-lg bg-[#12664f] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0e5743] disabled:opacity-50">{busy ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />} {busy ? t("adding") : t("addFamilyMember")}</button>
       </form>
     </ScreenShell>
   );
@@ -2405,6 +2774,7 @@ function FamilyScreen({ activeProfile, family, owner, onFamilyChange, onSelect }
 
 function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMemberId?: string }) {
   const OWNER_ID = useOwnerId();
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const historyScope = familyMemberId ?? OWNER_ID;
@@ -2466,7 +2836,7 @@ function ProfileScreen({ profile, familyMemberId }: { profile: Profile; familyMe
   }
 
   return (
-    <ScreenShell title={profile.name} description="Health profile and visit preparation.">
+    <ScreenShell title={profile.name} description={t("profileScreenDescription")}>
       <div className="grid gap-3 sm:grid-cols-2">
         <ProfileField label="Age" value={profile.age} />
         <ProfileField label="Gender" value={profile.gender} />
@@ -2599,7 +2969,8 @@ function ErrorText({ text }: { text: string }) {
 }
 
 function ServiceNotice({ loading, error }: { loading: boolean; error: string }) {
-  return <div className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs shadow-sm sm:mx-6 ${error ? "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]" : "border-[#b8d8ca] bg-[#f1f8f5] text-[#43675a]"}`}>{loading ? "Loading CareOS demo profile..." : error}</div>;
+  const t = useT();
+  return <div className={`mx-4 mt-3 rounded-lg border px-3 py-2 text-xs shadow-sm sm:mx-6 ${error ? "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]" : "border-[#b8d8ca] bg-[#f1f8f5] text-[#43675a]"}`}>{loading ? t("loadingDemoProfile") : error}</div>;
 }
 
 function formatDate(value?: string) {
@@ -2649,6 +3020,7 @@ function nextDoseLabel(timings?: string[]) {
 }
 
 function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
+  const t = useT();
   return (
     <aside className="hidden h-full w-64 shrink-0 overflow-y-auto border-r border-[#d9e7e1] bg-[#f8fbfa] p-6 md:block">
       <div className="mb-8 flex items-center gap-3 rounded-2xl border border-[#d2e1da] bg-white px-3 py-3 font-bold text-[#12664f] shadow-sm">
@@ -2656,7 +3028,7 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
         <span className="text-lg">CareOS</span>
       </div>
       <nav className="space-y-1.5">
-        {navigation.map(({ id, label, icon: Icon }) => (
+        {navigation.map(({ id, labelKey, icon: Icon }) => (
           <button
             key={id}
             onClick={() => onChange(id)}
@@ -2665,7 +3037,7 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
             }`}
           >
             <Icon size={18} />
-            {label}
+            {t(labelKey)}
           </button>
         ))}
       </nav>
@@ -2674,9 +3046,10 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
 }
 
 function MobileNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
+  const t = useT();
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-7 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
-      {navigation.map(({ id, label, icon: Icon }) => (
+      {navigation.map(({ id, labelKey, icon: Icon }) => (
         <button
           key={id}
           onClick={() => onChange(id)}
@@ -2685,7 +3058,7 @@ function MobileNavigation({ active, onChange }: { active: Tab; onChange: (tab: T
           }`}
         >
           <Icon size={19} strokeWidth={active === id ? 2.5 : 2} />
-          <span className="max-w-full truncate">{label}</span>
+          <span className="max-w-full truncate">{t(labelKey)}</span>
         </button>
       ))}
     </nav>

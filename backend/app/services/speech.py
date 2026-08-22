@@ -19,6 +19,11 @@ def sanitize_tts_text(text: str) -> str:
     cleaned = re.sub(r"^\s*\d+[.)]\s+", "", cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", cleaned)
     cleaned = cleaned.replace("|", ", ")
+    # gTTS (both English and Hindi voices) sometimes verbalizes standalone
+    # exclamation marks instead of just using them for intonation. Swap them
+    # for a period so the sentence still pauses naturally without being read
+    # aloud as "exclamation".
+    cleaned = re.sub(r"!+", ".", cleaned)
     cleaned = cleaned.replace("OPQRST", "O P Q R S T")
     cleaned = cleaned.replace("OLD CART", "O L D C A R T")
 

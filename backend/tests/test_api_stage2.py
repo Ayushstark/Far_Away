@@ -353,7 +353,7 @@ def test_upload_report_stores_file_and_report_row(monkeypatch) -> None:
 
 def test_family_medication_and_history_routes(monkeypatch) -> None:
     monkeypatch.setattr(db, "create_family_member", lambda **kwargs: {"id": "family-1", **kwargs})
-    monkeypatch.setattr(db, "get_family_members", lambda owner_id: [{"owner_id": owner_id}])
+    monkeypatch.setattr(db, "get_family_members", lambda owner_id, **kwargs: [{"owner_id": owner_id}])
     monkeypatch.setattr(db, "add_medication", lambda **kwargs: {"id": "med-1", **kwargs})
     monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [{"drug_name": "Metformin"}])
     monkeypatch.setattr(db, "get_health_history", lambda *args, **kwargs: "Timeline")

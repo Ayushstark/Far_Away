@@ -466,3 +466,39 @@ def test_get_retention_summary_capability_status_without_blocked_or_unresolved(m
     summary = db.get_retention_summary("user-1")
 
     assert summary["capability_status"] == "partial"
+
+
+def test_get_family_members_defaults_to_active_status(monkeypatch) -> None:
+    client = FakeClient({"family_members": [{"id": "fm-1", "lifecycle_status": "active"}]})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    members = db.get_family_members("user-1")
+
+    assert members == [{"id": "fm-1", "lifecycle_status": "active"}]
+    assert (
+        "family_members",
+        "in",
+        "lifecycle_status",
+        ["active"],
+    ) in client.calls
+
+
+def test_family_member_lifecycle_action_archives_member(monkeypatch) -> None:
+    client = FakeClient({"family_members": [{"id": "fm-1", "lifecycle_status": "active"}]})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.family_member_lifecycle_action("user-1", "fm-1", "archive", reason="No longer under care")
+
+    assert result["lifecycle_status"] == "archived"
+    assert result["completion_status"] == "complete"
+    assert result["error_message"] is None
+
+
+def test_family_member_lifecycle_action_blocked_when_member_missing(monkeypatch) -> None:
+    client = FakeClient({"family_members": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.family_member_lifecycle_action("user-1", "missing-id", "delete")
+
+    assert result["completion_status"] == "blocked"
+    assert result["error_message"] == "Family member not found."

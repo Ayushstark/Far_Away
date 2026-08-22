@@ -135,6 +135,32 @@ def _insert_skipping_missing_columns(table: str, payload: dict[str, Any]) -> Any
                 raise
 
 
+def _update_skipping_missing_columns(
+    table: str,
+    payload: dict[str, Any],
+    scope: Any,
+) -> Any:
+    """Like _insert_skipping_missing_columns, but for an update + filter chain.
+
+    `scope` narrows the update to the right row(s), e.g.
+    `lambda query: query.eq("owner_id", owner_id).eq("id", member_id)`.
+    """
+    current = dict(payload)
+    while True:
+        try:
+            return scope(get_client().table(table).update(current)).execute()
+        except Exception as exc:
+            message = str(exc)
+            missing_match = MISSING_COLUMN.search(message)
+            if missing_match:
+                missing = missing_match.group(1)
+                if missing not in current:
+                    raise
+                current.pop(missing)
+                continue
+            raise
+
+
 def get_family_member(owner_id: str, family_member_id: str) -> dict[str, Any] | None:
     response = (
         get_client()
@@ -432,16 +458,93 @@ def create_family_member(
     return _first_row(response.data)
 
 
-def get_family_members(owner_id: str) -> list[dict[str, Any]]:
-    response = (
+def get_family_members(owner_id: str, *, status: str = "active") -> list[dict[str, Any]]:
+    if status not in RECORD_STATUS_FILTERS:
+        status = "active"
+    query = (
         get_client()
         .table("family_members")
         .select("*")
         .eq("owner_id", owner_id)
-        .order("created_at", desc=False)
+    )
+    query = _apply_status_filter(query, status)
+    response = query.order("created_at", desc=False).execute()
+    return response.data or []
+
+
+def family_member_lifecycle_action(
+    owner_id: str,
+    member_id: str | int,
+    action: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Archive, restore, or soft-delete a family member profile.
+
+    Family members live outside RETENTION_TABLES (they are scoped by
+    owner_id, not user_id + family_member_id), so this mirrors
+    lifecycle_action's status transitions and error handling without
+    reusing its per-record health-data plumbing.
+    """
+    if action not in {"archive", "restore", "delete"}:
+        return {
+            "member_id": str(member_id),
+            "action": action,
+            "lifecycle_status": None,
+            "completion_status": "blocked",
+            "message": "Unsupported lifecycle action.",
+            "error_message": "Unsupported lifecycle action.",
+        }
+
+    record = (
+        get_client()
+        .table("family_members")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .eq("id", member_id)
+        .limit(1)
         .execute()
     )
-    return response.data or []
+    row = record.data[0] if record.data else None
+    if not row:
+        return {
+            "member_id": str(member_id),
+            "action": action,
+            "lifecycle_status": None,
+            "completion_status": "blocked",
+            "message": "Family member not found.",
+            "error_message": "Family member not found.",
+        }
+
+    if action == "archive":
+        next_status = "archived"
+    elif action == "restore":
+        next_status = "active"
+    else:
+        next_status = "deleted"
+
+    payload = {"lifecycle_status": next_status, "retention_reason": reason}
+    completion_status = "complete"
+    error_message = None
+    try:
+        response = _update_skipping_missing_columns(
+            "family_members",
+            payload,
+            lambda query: query.eq("owner_id", owner_id).eq("id", member_id),
+        )
+        updated = (response.data[0] if response.data else None) or {**row, "lifecycle_status": next_status}
+    except Exception as exc:
+        completion_status = "blocked"
+        error_message = str(exc)
+        updated = {**row, "lifecycle_status": row.get("lifecycle_status") or "active"}
+
+    return {
+        "member_id": str(member_id),
+        "action": action,
+        "lifecycle_status": updated.get("lifecycle_status") or next_status,
+        "completion_status": completion_status,
+        "message": _lifecycle_message(action, "family_members", completion_status),
+        "error_message": error_message,
+    }
 
 
 def upload_report_file(user_id: str, filename: str, content: bytes) -> str:

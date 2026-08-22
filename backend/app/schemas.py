@@ -217,6 +217,12 @@ class FamilyMemberCreate(BaseModel):
     known_conditions: list[str] = Field(default_factory=list)
 
 
+class FamilyMemberLifecycleRequest(BaseModel):
+    owner_id: str
+    action: Literal["archive", "restore", "delete"]
+    reason: str = ""
+
+
 class MedicationCreate(BaseModel):
     user_id: str
     drug_name: str

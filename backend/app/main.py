@@ -32,6 +32,7 @@ from backend.app.schemas import (
     AuthProfileRequest,
     AuthSignupRequest,
     FamilyMemberCreate,
+    FamilyMemberLifecycleRequest,
     MedicationCreate,
     HistoryResponse,
     InteractionCheckRequest,
@@ -435,11 +436,25 @@ async def add_family_member(request: FamilyMemberCreate) -> dict:
 
 
 @app.get("/family/{owner_id}")
-async def family_members(owner_id: str) -> list[dict]:
+async def family_members(owner_id: str, status: str = "active") -> list[dict]:
     try:
-        return db.get_family_members(owner_id)
+        return db.get_family_members(owner_id, status=status)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not load family members: {exc}") from exc
+
+
+@app.post("/family/{owner_id}/{member_id}/lifecycle")
+async def family_member_lifecycle(
+    owner_id: str,
+    member_id: str,
+    request: FamilyMemberLifecycleRequest,
+) -> dict:
+    if request.owner_id != owner_id:
+        raise HTTPException(status_code=400, detail="Owner mismatch for family member lifecycle action.")
+    try:
+        return db.family_member_lifecycle_action(owner_id, member_id, request.action, request.reason)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not update family member: {exc}") from exc
 
 
 @app.get("/profile/{user_id}")
