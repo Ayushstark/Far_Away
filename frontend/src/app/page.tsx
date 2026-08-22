@@ -138,6 +138,7 @@ const STRINGS = {
   unresolved: { en: "Unresolved", hi: "अनसुलझा" },
   noActions: { en: "No actions", hi: "कोई कार्रवाई नहीं" },
   lifecycleBreakdownHeading: { en: "Lifecycle breakdown by record type", hi: "रिकॉर्ड प्रकार अनुसार लाइफसाइकिल विवरण" },
+  lifecycleTreeHeading: { en: "Lifecycle tree", hi: "लाइफसाइकिल ट्री" },
   healthEvents: { en: "Health events", hi: "स्वास्थ्य घटनाएँ" },
   reportsLabel: { en: "Reports", hi: "रिपोर्ट" },
   medicationsLabel: { en: "Medications", hi: "दवाइयाँ" },
@@ -1848,6 +1849,7 @@ function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
   return (
     <ScreenShell title={t("dataScreenTitle")} description={t("dataScreenDescription")}>
       {summary && <RetentionStatusPanel summary={summary} />}
+      {items && <LifecycleTreeView items={items} />}
       {items && <LifecycleBreakdownChart items={items} />}
       {items && <DemoScenarioPanel items={items} runAction={runAction} />}
       {notice && <p className="rounded-xl border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-sm font-medium text-[#12664f]">{notice}</p>}
@@ -2029,6 +2031,86 @@ function LifecycleBreakdownChart({ items }: { items: RetentionItems }) {
           <LifecycleStackedBar key={row.label} rowLabel={row.label} counts={row.counts} />
         ))}
       </div>
+      <div className="mt-4 border-t border-[#eef2ef] pt-3">
+        <LifecycleStatusLegend />
+      </div>
+    </section>
+  );
+}
+
+// A tree reading of the same data as LifecycleBreakdownChart: root "All
+// records" branching into the three record types, each branching into its
+// non-zero lifecycle states. Hairline gray connectors (recessive, never the
+// data color) draw the branches; status color + count + label carries the
+// actual data, matching the fixed status palette used everywhere else in
+// Data Control so a color never means two different things on this screen.
+function LifecycleTreeView({ items }: { items: RetentionItems }) {
+  const t = useT();
+  function countsFor(records: RetentionRecord[]): Record<LifecycleStatusKey, number> {
+    const counts: Record<LifecycleStatusKey, number> = { active: 0, archived: 0, pending_deletion: 0, deleted: 0 };
+    for (const record of records) {
+      const status = (record.lifecycle_status || "active") as LifecycleStatusKey;
+      if (status in counts) counts[status] += 1;
+    }
+    return counts;
+  }
+
+  const branches: { label: string; counts: Record<LifecycleStatusKey, number> }[] = [
+    { label: t("healthEvents"), counts: countsFor(items.health_events) },
+    { label: t("reportsLabel"), counts: countsFor(items.reports) },
+    { label: t("medicationsLabel"), counts: countsFor(items.medications) },
+  ];
+  const grandTotal = branches.reduce(
+    (sum, branch) => sum + LIFECYCLE_STATUS_ORDER.reduce((s, key) => s + branch.counts[key], 0),
+    0,
+  );
+
+  return (
+    <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase text-[#71827a]">{t("lifecycleTreeHeading")}</p>
+
+      <div className="mt-4">
+        <div className="inline-flex items-center gap-2 rounded-lg border border-[#b8d8ca] bg-[#eef7f3] px-3 py-1.5 text-sm font-semibold text-[#12664f]">
+          <ShieldCheck size={15} />
+          {t("allRecords")}
+          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-[#12664f]">{grandTotal}</span>
+        </div>
+
+        <div className="ml-3 mt-1 border-l border-[#d2e1da] pl-5">
+          {branches.map((branch) => {
+            const branchTotal = LIFECYCLE_STATUS_ORDER.reduce((sum, key) => sum + branch.counts[key], 0);
+            const activeStatuses = LIFECYCLE_STATUS_ORDER.filter((key) => branch.counts[key] > 0);
+            return (
+              <div key={branch.label} className="relative py-2">
+                <span className="absolute -left-5 top-4 h-px w-4 bg-[#d2e1da]" aria-hidden="true" />
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#18352a]">
+                  {branch.label}
+                  <span className="rounded-full bg-[#f4f8f6] px-2 py-0.5 text-xs font-bold text-[#52665d]">{branchTotal}</span>
+                </div>
+                {activeStatuses.length === 0 ? (
+                  <p className="ml-3 mt-1 border-l border-dashed border-[#e1ece7] pl-5 text-xs text-[#8a978f]">{t("noRecordsFound")}</p>
+                ) : (
+                  <div className="ml-3 mt-1.5 space-y-1.5 border-l border-dashed border-[#e1ece7] pl-5">
+                    {activeStatuses.map((key) => {
+                      const meta = LIFECYCLE_STATUS_META[key];
+                      const count = branch.counts[key];
+                      return (
+                        <div key={key} className="relative flex items-center gap-2 text-xs">
+                          <span className="absolute -left-5 top-1/2 h-px w-4 bg-[#e1ece7]" aria-hidden="true" />
+                          <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} />
+                          <span className="font-medium text-[#3c4b44]">{t(meta.labelKey)}</span>
+                          <span className="font-semibold text-[#18352a]">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="mt-4 border-t border-[#eef2ef] pt-3">
         <LifecycleStatusLegend />
       </div>
