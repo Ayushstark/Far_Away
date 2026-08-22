@@ -21,8 +21,9 @@ specialist AI agents and a shared health timeline.
 
 ## Current Stage
 
-**Stage 5 plus the proactive companion upgrade is complete. The end-to-end
-hackathon MVP is ready for demonstration.**
+**Stage 5, the proactive companion upgrade, and the Round 2 data-lifecycle
+and trust layer are all complete. The end-to-end hackathon MVP is ready for
+demonstration.**
 
 - Supabase database layer for users, family, events, medications, and reports
 - Emergency-first orchestrator with five specialist agents
@@ -43,6 +44,14 @@ hackathon MVP is ready for demonstration.**
 - Display-only three-card health summary on Chat: latest concern, avoid/do steps, quick summary
 - Actionable CareOS Daily Plan cards backed by medications, unresolved symptoms, and reports
 - Structured Profile timeline that merges symptoms, medications, and reports into one view
+- Archive / restore / delete lifecycle for health events, reports, medications, and family members
+- Centralized Data Control tab: retention summary, lifecycle tree + stacked-bar charts, per-record actions, audit log
+- Consent + Data Confidence chips showing storage state and AI-context usage on every record
+- Trust Timeline merging symptoms, reports, medications, and lifecycle actions into one chronological view
+- AI Context Transparency panel showing exactly what fed a chat reply and what archived data was excluded
+- One-click guided demo scenario that drives the archive → restore → delete flow end to end
+- Centralized English/Hindi translation layer covering navigation, screen chrome, and lifecycle UI
+- Punctuation-safe, faster CareOS voice output (no spoken `*`/`!`, ~15% quicker playback)
 
 ### Build Progress
 
@@ -57,6 +66,11 @@ hackathon MVP is ready for demonstration.**
 | Family isolation | Profile-scoped chat, memory, medications, reports, insights, daily plan, and timelines | Complete |
 | Account access | Supabase Auth sign-up, sign-in, session persistence, profile mapping, and sign-out | Complete |
 | Standout layer | Daily plan, display-only insight cards, structured health timeline, report dashboard | Complete |
+| Round 2: Data lifecycle | Archive/restore/delete, Data Control tab, retention audit log | Complete |
+| Round 2: Trust layer | Consent chips, Trust Timeline, AI Context Transparency, one-click demo | Complete |
+| Round 2: Family lifecycle | Archive/restore/delete for dependent profiles | Complete |
+| Round 2: Visualization | Lifecycle tree view + validated status-palette stacked-bar charts | Complete |
+| Round 2: i18n & voice polish | EN/HI UI translation layer, punctuation-safe TTS, faster playback | Complete |
 
 ## Five-Agent Architecture
 
@@ -105,9 +119,10 @@ CareOS now separates passive context from active next steps:
 
 - **Three chat insight cards** are display-only scenario summaries: latest health
   concern, what to avoid/do, and a quick health summary.
-- **CareOS Daily Plan** is actionable: tapping a plan item sends a useful
-  follow-up prompt such as medicine guidance, report review, or unresolved
-  symptom check-in.
+- **CareOS Daily Plan** is a display-only set of suggestions and updates
+  (medicine guidance, report review, unresolved symptom check-ins) - the cards
+  are informational, not clickable, so they can't be mistaken for an action
+  that sends a message on the user's behalf.
 - **Profile Health Timeline** turns raw Supabase records into a scannable
   timeline of symptoms, active medications, and reports.
 - **Report Dashboard** highlights recent reports, flagged values, and review
@@ -136,6 +151,72 @@ Supabase Auth identities use UUIDs while the existing CareOS schema uses bigint
 profile IDs. `POST /auth/profile` verifies the Supabase access token, then safely
 resolves or creates the matching CareOS owner profile. The service-role key
 remains backend-only; the frontend receives only the public Supabase anon key.
+
+## Data Lifecycle And Trust Layer (Round 2)
+
+CareOS treats "delete" as a first-class, auditable workflow rather than a
+silent database row removal. Every health event, report, medication, and
+family member profile carries a `lifecycle_status`, and every archive,
+restore, or delete action is written to a `data_lifecycle_events` audit table
+before it ever changes what the AI sees.
+
+### Lifecycle state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: record created
+    Active --> Archived: Archive
+    Archived --> Active: Restore
+    Active --> Deleted: Delete
+    Archived --> Deleted: Delete
+    Deleted --> [*]: audit row retained
+```
+
+| Status | Meaning | Used for AI context? | Visible on |
+| --- | --- | --- | --- |
+| `active` | Normal, in-use record | Yes | All screens (default filter) |
+| `archived` | Kept, but set aside | No | Data Control · Archived filter |
+| `pending_deletion` | Mid-transition (rare, surfaced if a delete is only partially completed) | No | Data Control · lifecycle audit |
+| `deleted` | Soft-deleted; row and audit trail retained for accountability | No | Data Control · Deleted filter |
+
+### Where this lives in the product
+
+| Feature | What it does | Where |
+| --- | --- | --- |
+| **Data Control Center** | One centralized tab for archive / restore / delete on health events, reports, medications, and family members - deliberately *not* duplicated across every screen, so busy-state and error handling live in a single place | `Data` tab |
+| **Consent + Data Confidence chips** | Two independent chips per record: where it sits in its lifecycle (`Stored` / `Archived` / `Deleted - audit retained`) and whether it is actually feeding the AI right now (`Used for AI context` / `Not used in AI context`) | Reports, Medications, Data Control |
+| **Trust Timeline** | Merges symptoms, reports, medications, *and* lifecycle actions (archive/restore/delete events) into one chronological view | `Profile` tab |
+| **AI Context Transparency** | Expandable panel on each chat reply showing exactly how many active health events / medications / reports fed that answer, and how many archived/deleted records were deliberately excluded | Chat message bubbles |
+| **One-click guided demo** | Drives a real archive → restore → delete sequence against seeded records so judges can see the full lifecycle without manual clicking | Data Control tab |
+| **Lifecycle visualizations** | A rooted tree (all records → record type → lifecycle state) and a validated-palette stacked-bar chart, both reading the same counts two different ways | Data Control tab |
+
+### Retention API routes
+
+| Route | Purpose |
+| --- | --- |
+| `GET /retention/summary/{user_id}` | Counts by lifecycle status + completion-status capability badge |
+| `GET /retention/items/{user_id}` | Full record lists (health events, reports, medications) with lifecycle state, plus recent audit events |
+| `GET /retention/audit/{user_id}` | Raw `data_lifecycle_events` audit trail |
+| `POST /retention/action` | Archive / restore / delete a single health event, report, or medication |
+| `POST /family/{owner_id}/{member_id}/lifecycle` | Archive / restore / delete a dependent family member profile |
+| `GET /family/{owner_id}?status=` | List family members filtered by `active` / `archived` / `deleted` / `all` |
+| `GET /reports/{user_id}?status=` · `GET /medications/{user_id}?status=` | Same status filter, reused so Reports and Medications stay read-only views of one shared lifecycle model |
+| `GET /doctor-brief/{user_id}?include_archived=` · `GET /api/care-brief/{profile_id}?include_archived=` | Doctor brief and PDF export, with an explicit override to widen the brief to include archived data |
+
+Running a chat message is itself lifecycle-aware: `POST /chat` attaches a
+`context_used` object to every healthcare reply, reporting exactly how many
+active records were read per table and how many archived/deleted records were
+excluded - so "what did the AI actually see" is never a guess.
+
+## Internationalization And Voice Output
+
+| Area | Behavior |
+| --- | --- |
+| UI chrome | A centralized `STRINGS` dictionary (English/Hindi) drives navigation labels, tab titles, screen titles/descriptions, status filters, lifecycle chips, and the Family screen - not just the chat screen |
+| Language source | One shared `localStorage`-backed language store; any component reads it via a `useT()` hook, no prop drilling required |
+| Chat and voice | Chat replies, greetings, and voice output already respect the selected language (`en-IN` / `hi-IN` speech recognition, Hindi/English gTTS speech) |
+| Voice punctuation | `sanitize_tts_text()` strips markdown, asterisks, and exclamation marks so gTTS never speaks `*`, `**`, or `!` aloud, in either language |
+| Voice speed | CareOS voice playback runs at `1.15x` (`Audio.playbackRate`) - noticeably brisker without becoming hard to follow |
 
 ## Request Flow
 
@@ -253,12 +334,19 @@ Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
 `family_members`, `health_events`, `medications`, and `reports`.
 
-Run [`supabase_schema_fix.sql`](supabase_schema_fix.sql) once in the Supabase SQL
-editor. It fixes the live project's misspelled health-event foreign key and
-allows owner records without requiring a family member. It also adds the
-`auth_user_id` and `email` fields required to map Supabase Auth accounts to
-CareOS profiles. Enable Email authentication in Supabase Authentication; email
-confirmation may be enabled or disabled depending on the desired demo flow.
+Run these three SQL files once each, in order, in the Supabase SQL editor:
+
+| # | File | What it does |
+| --- | --- | --- |
+| 1 | [`supabase_schema_fix.sql`](supabase_schema_fix.sql) | Fixes the misspelled health-event foreign key, allows owner records without a family member, and adds `auth_user_id`/`email` to map Supabase Auth accounts to CareOS profiles |
+| 2 | [`supabase_data_retention.sql`](supabase_data_retention.sql) | Adds `lifecycle_status`/`archived_at`/`deleted_at`/`restored_at`/`retention_reason` to `health_events`, `reports`, and `medications`, and creates the `data_lifecycle_events` audit table |
+| 3 | [`supabase_family_lifecycle.sql`](supabase_family_lifecycle.sql) | Adds `lifecycle_status`/`retention_reason` to `family_members` so dependent profiles can be archived/restored/deleted the same way |
+
+Skipping #2 or #3 doesn't break the app, but Data Control and the Family
+archive/delete buttons will fail with a lifecycle-related error until the
+matching migration has been run. Enable Email authentication in Supabase
+Authentication; email confirmation may be enabled or disabled depending on
+the desired demo flow.
 
 ### 2. Install and run the backend
 
@@ -340,8 +428,20 @@ profile and the live Supabase project's `bigint` identifiers.
    symptom, medication, and specialist agent trail.
 10. Answer an unresolved-symptom greeting with `better now` to show CareOS
     closing the follow-up loop.
-11. Review the three display-only insight cards, then tap a CareOS Daily Plan
-    card to start a useful follow-up conversation.
+11. Review the three display-only insight cards and the CareOS Daily Plan
+    suggestions (informational only - not clickable).
+12. Open a chat reply and expand **Context used** to show exactly which
+    active records fed that answer.
+13. Open **Data Control**, click **Run guided demo** to watch a real
+    archive → restore → delete sequence, then review the lifecycle tree and
+    stacked-bar charts and the audit log at the bottom of the tab.
+14. Open **Reports** or **Medications**, switch the status filter to
+    **Archived**, and point out the Consent + Data Confidence chips on each
+    record (storage state vs. whether it's used in AI context).
+15. Open **Family**, archive a dependent profile, show it disappear from the
+    profile switcher, then restore it from the **Archived** filter.
+16. Open **Profile** and scroll the Trust Timeline to show lifecycle actions
+    interleaved with symptoms, reports, and medications.
 
 ## Main API Routes
 
@@ -361,6 +461,9 @@ profile and the live Supabase project's `bigint` identifiers.
 | `GET /history/{user_id}` | Return the health event timeline |
 | `GET /doctor-brief/{user_id}` | Generate a doctor visit brief |
 | `GET /api/care-brief/{profile_id}/pdf` | Download the brief as PDF |
+
+> Retention, lifecycle, and family archive/delete routes are listed
+> separately under [Data Lifecycle And Trust Layer](#data-lifecycle-and-trust-layer-round-2).
 
 ## Verification
 
@@ -396,13 +499,19 @@ frontend lint, TypeScript, and production build checks.
 - Live Supabase-compatible demo seed and schema migration
 - Loading, empty, progress, and error states across primary workflows
 - Backend API/database tests and frontend production verification
+- Archive/restore/delete lifecycle for health events, reports, medications, and family members
+- Centralized Data Control tab with retention audit log and a guided one-click demo
+- Consent + Data Confidence chips and an AI Context Transparency panel on chat replies
+- Trust Timeline merging health data with lifecycle actions
+- Lifecycle tree and validated-palette stacked-bar visualizations
+- Centralized English/Hindi UI translation layer beyond the chat screen
+- Punctuation-safe, ~15% faster CareOS voice output
 
 ### Before Real Users
 
-- Add Supabase Auth and remove the hard-coded demo user
 - Enable and test row-level security for every table and storage object
-- Add explicit consent, data deletion, and emergency-contact notification flows
-- Encrypt sensitive fields and define retention and audit-log policies
+- Add emergency-contact notification flows
+- Encrypt sensitive fields and set a hard-delete/purge policy behind the current soft-delete lifecycle
 - Add clinician-reviewed prompt evaluations and emergency false-negative tests
 - Add server-scheduled push/SMS medication reminder delivery
 - Add observability, rate limits, provider-failure monitoring, and retries
