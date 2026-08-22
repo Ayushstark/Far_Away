@@ -90,6 +90,7 @@ def test_get_health_history_formats_events_and_scopes_owner(monkeypatch) -> None
     assert "2026-06-11 | symptom | severity: mild | body part: head" in history
     assert "CareOS response: Track hydration and severity." in history
     assert ("health_events", "is", "family_member_id", "null") in client.calls
+    assert ("health_events", "in", "lifecycle_status", ["active"]) in client.calls
 
 
 def test_get_medications_scopes_family_member(monkeypatch) -> None:
@@ -101,6 +102,7 @@ def test_get_medications_scopes_family_member(monkeypatch) -> None:
 
     assert result == rows
     assert ("medications", "eq", "is_active", True) in client.calls
+    assert ("medications", "in", "lifecycle_status", ["active"]) in client.calls
     assert ("medications", "eq", "family_member_id", "family-1") in client.calls
 
 
@@ -225,6 +227,47 @@ def test_get_reports_returns_recent_family_reports(monkeypatch) -> None:
 
     assert result == rows
     assert ("reports", "eq", "user_id", "user-1") in client.calls
+    assert ("reports", "in", "lifecycle_status", ["active"]) in client.calls
     assert ("reports", "eq", "family_member_id", "family-1") in client.calls
     assert ("reports", "order", "uploaded_at", True) in client.calls
     assert ("reports", "limit", 3) in client.calls
+
+
+def test_lifecycle_action_archives_and_audits_record(monkeypatch) -> None:
+    rows = {
+        "reports": [{"id": "report-1", "user_id": "user-1", "lifecycle_status": "active"}],
+        "data_lifecycle_events": [],
+    }
+    client = FakeClient(rows)
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.lifecycle_action(
+        user_id="user-1",
+        target_table="reports",
+        target_id="report-1",
+        action="archive",
+        reason="Old report",
+    )
+
+    assert result["completion_status"] == "complete"
+    assert result["lifecycle_status"] == "archived"
+    update_call = next(call for call in client.calls if call[0] == "reports" and call[1] == "update")
+    assert update_call[2]["retention_reason"] == "Old report"
+    assert update_call[2]["lifecycle_status"] == "archived"
+    assert update_call[2]["archived_at"]
+    audit_call = next(call for call in client.calls if call[0] == "data_lifecycle_events" and call[1] == "insert")
+    assert audit_call[2]["completion_status"] == "complete"
+    assert audit_call[2]["previous_status"] == "active"
+    assert audit_call[2]["next_status"] == "archived"
+
+
+def test_lifecycle_action_blocks_unowned_record(monkeypatch) -> None:
+    client = FakeClient({"reports": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    result = db.lifecycle_action("user-1", "reports", "missing", "delete")
+
+    assert result["completion_status"] == "blocked"
+    assert result["lifecycle_status"] == "delete_failed"
+    audit_call = next(call for call in client.calls if call[0] == "data_lifecycle_events" and call[1] == "insert")
+    assert audit_call[2]["completion_status"] == "blocked"

@@ -22,6 +22,9 @@ TEXT_ARRAY_COLUMNS = {
     "family_members": {"known_conditions"},
     "medications": {"timing"},
 }
+RETENTION_TABLES = {"health_events", "reports", "medications"}
+LIFECYCLE_STATUSES = ("active", "archived", "pending_deletion", "deleted")
+COMPLETION_STATUSES = ("complete", "partial", "blocked", "unresolved")
 
 
 def get_client() -> Client:
@@ -167,7 +170,7 @@ def get_health_history(
         .eq("user_id", user_id)
     )
     response = (
-        _scope_family_member(query, family_member_id)
+        _active_lifecycle(_scope_family_member(query, family_member_id))
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -206,7 +209,7 @@ def get_recent_health_events(
         .eq("user_id", user_id)
     )
     response = (
-        _scope_family_member(query, family_member_id)
+        _active_lifecycle(_scope_family_member(query, family_member_id))
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -229,7 +232,7 @@ def get_unresolved_events(
         .eq("resolved", False)
     )
     response = (
-        _scope_family_member(query, family_member_id)
+        _active_lifecycle(_scope_family_member(query, family_member_id))
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -282,7 +285,7 @@ def get_medications(
         .eq("is_active", True)
     )
     response = (
-        _scope_family_member(query, family_member_id)
+        _active_lifecycle(_scope_family_member(query, family_member_id))
         .order("created_at", desc=True)
         .execute()
     )
@@ -345,7 +348,7 @@ def get_past_reports_summary(
         .eq("user_id", user_id)
     )
     response = (
-        _scope_family_member(query, family_member_id)
+        _active_lifecycle(_scope_family_member(query, family_member_id))
         .order("uploaded_at", desc=True)
         .limit(3)
         .execute()
@@ -369,8 +372,11 @@ def get_reports(
     user_id: str,
     family_member_id: str | None = None,
     limit: int = 20,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     query = get_client().table("reports").select("*").eq("user_id", user_id)
+    if not include_archived:
+        query = _active_lifecycle(query)
     response = (
         _scope_family_member(query, family_member_id)
         .order("uploaded_at", desc=True)
@@ -435,11 +441,256 @@ def upload_report_file(user_id: str, filename: str, content: bytes) -> str:
     return path
 
 
+def lifecycle_action(
+    user_id: str,
+    target_table: str,
+    target_id: str | int,
+    action: str,
+    reason: str = "",
+    family_member_id: str | None = None,
+) -> dict[str, Any]:
+    """Archive, restore, or soft-delete a scoped record and write an audit row."""
+    if target_table not in RETENTION_TABLES:
+        return _blocked_lifecycle_result(target_table, target_id, action, "Unsupported retention table.")
+    if action not in {"archive", "restore", "delete"}:
+        return _blocked_lifecycle_result(target_table, target_id, action, "Unsupported lifecycle action.")
+
+    record = _get_retention_record(user_id, target_table, target_id, family_member_id)
+    if not record:
+        result = _blocked_lifecycle_result(target_table, target_id, action, "Record not found for this profile.")
+        _insert_lifecycle_event(
+            user_id,
+            family_member_id,
+            target_table,
+            target_id,
+            action,
+            "blocked",
+            None,
+            None,
+            reason,
+            result["error_message"],
+            None,
+        )
+        return result
+
+    previous_status = record.get("lifecycle_status") or "active"
+    timestamp = _now()
+    payload = {"retention_reason": reason}
+    if action == "archive":
+        next_status = "archived"
+        payload.update({"lifecycle_status": next_status, "archived_at": timestamp})
+    elif action == "restore":
+        next_status = "active"
+        payload.update({"lifecycle_status": next_status, "restored_at": timestamp})
+    else:
+        next_status = "deleted"
+        payload.update({"lifecycle_status": next_status, "deleted_at": timestamp})
+
+    completion_status = "complete"
+    error_message = None
+    try:
+        response = (
+            get_client()
+            .table(target_table)
+            .update(payload)
+            .eq("id", target_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        updated = _first_row(response.data)
+    except Exception as exc:
+        completion_status = "blocked"
+        error_message = str(exc)
+        next_status = f"{action}_failed"
+        updated = {**record, "lifecycle_status": next_status}
+
+    _insert_lifecycle_event(
+        user_id,
+        family_member_id,
+        target_table,
+        target_id,
+        action,
+        completion_status,
+        previous_status,
+        next_status,
+        reason,
+        error_message,
+        record,
+    )
+    return {
+        "target_table": target_table,
+        "target_id": str(target_id),
+        "action": action,
+        "lifecycle_status": updated.get("lifecycle_status") or next_status,
+        "completion_status": completion_status,
+        "message": _lifecycle_message(action, target_table, completion_status),
+        "error_message": error_message,
+    }
+
+
+def get_retention_summary(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> dict[str, Any]:
+    summary = {status: 0 for status in LIFECYCLE_STATUSES}
+    completion = {status: 0 for status in COMPLETION_STATUSES}
+    for table in RETENTION_TABLES:
+        for row in _retention_rows(user_id, table, family_member_id):
+            status = row.get("lifecycle_status") or "active"
+            if status in summary:
+                summary[status] += 1
+
+    events = get_lifecycle_audit(user_id, family_member_id, limit=100)
+    for event in events:
+        status = event.get("completion_status")
+        if status in completion:
+            completion[status] += 1
+
+    capability_status = "no_actions"
+    if completion["blocked"]:
+        capability_status = "blocked"
+    elif completion["unresolved"]:
+        capability_status = "unresolved"
+    elif completion["partial"]:
+        capability_status = "partial"
+    elif completion["complete"]:
+        capability_status = "complete"
+
+    return {
+        **summary,
+        **completion,
+        "capability_status": capability_status,
+        "latest_event": events[0] if events else None,
+    }
+
+
+def get_retention_items(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "health_events": _retention_rows(user_id, "health_events", family_member_id),
+        "reports": _retention_rows(user_id, "reports", family_member_id),
+        "medications": _retention_rows(user_id, "medications", family_member_id),
+        "events": get_lifecycle_audit(user_id, family_member_id, limit=50),
+    }
+
+
+def get_lifecycle_audit(
+    user_id: str,
+    family_member_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    query = (
+        get_client()
+        .table("data_lifecycle_events")
+        .select("*")
+        .eq("user_id", user_id)
+    )
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
 def _scope_family_member(query: Any, family_member_id: str | None) -> Any:
     # Null means the owner's own record; a UUID switches to a dependent profile.
     if family_member_id:
         return query.eq("family_member_id", family_member_id)
     return query.is_("family_member_id", "null")
+
+
+def _active_lifecycle(query: Any) -> Any:
+    return query.in_("lifecycle_status", ["active"])
+
+
+def _retention_rows(
+    user_id: str,
+    table: str,
+    family_member_id: str | None = None,
+) -> list[dict[str, Any]]:
+    query = get_client().table(table).select("*").eq("user_id", user_id)
+    response = (
+        _scope_family_member(query, family_member_id)
+        .order("created_at", desc=True)
+        .limit(100)
+        .execute()
+    )
+    return response.data or []
+
+
+def _get_retention_record(
+    user_id: str,
+    table: str,
+    target_id: str | int,
+    family_member_id: str | None = None,
+) -> dict[str, Any] | None:
+    query = (
+        get_client()
+        .table(table)
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("id", target_id)
+    )
+    response = _scope_family_member(query, family_member_id).limit(1).execute()
+    return response.data[0] if response.data else None
+
+
+def _insert_lifecycle_event(
+    user_id: str,
+    family_member_id: str | None,
+    target_table: str,
+    target_id: str | int,
+    action: str,
+    completion_status: str,
+    previous_status: str | None,
+    next_status: str | None,
+    reason: str,
+    error_message: str | None,
+    snapshot: dict[str, Any] | None,
+) -> None:
+    payload = {
+        "user_id": user_id,
+        "family_member_id": family_member_id,
+        "target_table": target_table,
+        "target_id": target_id,
+        "action": action,
+        "completion_status": completion_status,
+        "previous_status": previous_status,
+        "next_status": next_status,
+        "reason": reason,
+        "error_message": error_message,
+        "snapshot": snapshot,
+        "completed_at": _now() if completion_status in {"complete", "partial", "blocked"} else None,
+    }
+    get_client().table("data_lifecycle_events").insert(payload).execute()
+
+
+def _blocked_lifecycle_result(
+    target_table: str,
+    target_id: str | int,
+    action: str,
+    error_message: str,
+) -> dict[str, Any]:
+    return {
+        "target_table": target_table,
+        "target_id": str(target_id),
+        "action": action,
+        "lifecycle_status": f"{action}_failed",
+        "completion_status": "blocked",
+        "message": "Lifecycle action was blocked.",
+        "error_message": error_message,
+    }
+
+
+def _lifecycle_message(action: str, table: str, completion_status: str) -> str:
+    label = table.replace("_", " ")
+    if completion_status == "complete":
+        return f"{label.title()} {action} completed and lifecycle state is visible."
+    return f"{label.title()} {action} did not fully complete."
 
 
 def _text_value(value: str | list[str] | tuple[str, ...] | None) -> str:
@@ -490,3 +741,7 @@ def _display_date(value: Any) -> str:
     if not value:
         return "Unknown date"
     return str(value)[:10]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

@@ -37,6 +37,9 @@ from backend.app.schemas import (
     InteractionCheckResponse,
     InsightCard,
     TimelineResponse,
+    RetentionActionRequest,
+    RetentionActionResponse,
+    RetentionSummaryResponse,
 )
 from backend.app.services.input_understanding import extract_intent
 from backend.app.services.orchestrator import Orchestrator
@@ -321,6 +324,51 @@ async def health_timeline(
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not build timeline: {exc}") from exc
+
+
+@app.get("/retention/summary/{user_id}", response_model=RetentionSummaryResponse)
+async def retention_summary(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> RetentionSummaryResponse:
+    try:
+        return RetentionSummaryResponse.model_validate(
+            db.get_retention_summary(user_id, family_member_id)
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load retention summary: {exc}") from exc
+
+
+@app.get("/retention/items/{user_id}")
+async def retention_items(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> dict:
+    try:
+        return db.get_retention_items(user_id, family_member_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load retention items: {exc}") from exc
+
+
+@app.get("/retention/audit/{user_id}")
+async def retention_audit(
+    user_id: str,
+    family_member_id: str | None = None,
+) -> list[dict]:
+    try:
+        return db.get_lifecycle_audit(user_id, family_member_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not load retention audit: {exc}") from exc
+
+
+@app.post("/retention/action", response_model=RetentionActionResponse)
+async def retention_action(request: RetentionActionRequest) -> RetentionActionResponse:
+    try:
+        return RetentionActionResponse.model_validate(
+            db.lifecycle_action(**request.model_dump())
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Retention action failed: {exc}") from exc
 
 
 @app.post("/api/memory/search", response_model=MemorySearchResponse)

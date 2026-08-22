@@ -3,6 +3,7 @@
 import axios from "axios";
 import {
   AlertTriangle,
+  Archive,
   BarChart3,
   Bell,
   BellRing,
@@ -22,6 +23,9 @@ import {
   Phone,
   Pill,
   TrendingUp,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
   Volume2,
   VolumeX,
   Send,
@@ -56,7 +60,7 @@ function loadChatMessages(key: string): ChatMessage[] {
   }
 }
 
-type Tab = "chat" | "history" | "reports" | "medications" | "family" | "profile";
+type Tab = "chat" | "history" | "data" | "reports" | "medications" | "family" | "profile";
 type Speaker = "user" | "assistant" | "system";
 type PreferredLanguage = "en" | "hi";
 type ThemeMode = "light" | "dark";
@@ -137,6 +141,40 @@ type TimelineResponse = {
   items: TimelineItem[];
 };
 
+type RetentionSummary = {
+  active: number;
+  archived: number;
+  pending_deletion: number;
+  deleted: number;
+  complete: number;
+  partial: number;
+  blocked: number;
+  unresolved: number;
+  capability_status: "complete" | "partial" | "blocked" | "unresolved" | "no_actions";
+  latest_event?: Record<string, unknown> | null;
+};
+
+type RetentionRecord = {
+  id: string | number;
+  lifecycle_status?: string;
+  event_type?: string;
+  description?: string;
+  report_type?: string;
+  ai_summary?: string;
+  drug_name?: string;
+  dose?: string;
+  created_at?: string;
+  uploaded_at?: string;
+  report_date?: string;
+};
+
+type RetentionItems = {
+  health_events: RetentionRecord[];
+  reports: RetentionRecord[];
+  medications: RetentionRecord[];
+  events: Array<Record<string, unknown>>;
+};
+
 type Profile = {
   id: string | number;
   name: string;
@@ -196,6 +234,7 @@ async function createCareOSAudio(text: string, preferredLanguage: PreferredLangu
 const navigation = [
   { id: "chat" as const, label: "Chat", icon: MessageCircle },
   { id: "history" as const, label: "History", icon: HistoryIcon },
+  { id: "data" as const, label: "Data", icon: ShieldCheck },
   { id: "reports" as const, label: "Reports", icon: FileText },
   { id: "medications" as const, label: "Medications", icon: Pill },
   { id: "family" as const, label: "Family", icon: Users },
@@ -204,6 +243,7 @@ const navigation = [
 
 const tabTitles: Record<Exclude<Tab, "chat">, string> = {
   history: "Chat history",
+  data: "Data control",
   reports: "Reports",
   medications: "Medications",
   family: "Family",
@@ -735,6 +775,8 @@ function CareOSApp({ onSignOut }: { onSignOut: () => Promise<void> }) {
               onClear={resetChatHistory}
               onBackToChat={() => setTab("chat")}
             />
+          ) : tab === "data" ? (
+            <DataControlScreen familyMemberId={familyMemberId} />
           ) : tab === "reports" ? (
             <ReportsScreen familyMemberId={familyMemberId} />
           ) : tab === "medications" ? (
@@ -1438,6 +1480,214 @@ function ChatHistoryScreen({
   );
 }
 
+async function fetchRetentionState(ownerId: string, familyMemberId?: string) {
+  const params = { family_member_id: familyMemberId };
+  const [summaryResponse, itemsResponse] = await Promise.all([
+    axios.get<RetentionSummary>(`${API_URL}/retention/summary/${ownerId}`, { params }),
+    axios.get<RetentionItems>(`${API_URL}/retention/items/${ownerId}`, { params }),
+  ]);
+  return { summary: summaryResponse.data, items: itemsResponse.data };
+}
+
+function DataControlScreen({ familyMemberId }: { familyMemberId?: string }) {
+  const OWNER_ID = useOwnerId();
+  const [summary, setSummary] = useState<RetentionSummary | null>(null);
+  const [items, setItems] = useState<RetentionItems | null>(null);
+  const [busyKey, setBusyKey] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const loading = !summary || !items;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRetentionState(OWNER_ID, familyMemberId)
+      .then((data) => {
+        if (cancelled) return;
+        setSummary(data.summary);
+        setItems(data.items);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        const detail = axios.isAxiosError(requestError) && requestError.response?.data?.detail;
+        setError(typeof detail === "string"
+          ? detail
+          : "Data lifecycle state could not be loaded. Run supabase_data_retention.sql, then refresh.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [OWNER_ID, familyMemberId]);
+
+  async function runAction(target_table: string, target_id: string | number, action: "archive" | "restore" | "delete") {
+    const key = `${target_table}-${target_id}-${action}`;
+    setBusyKey(key);
+    setNotice("");
+    setError("");
+    try {
+      const { data } = await axios.post<{
+        completion_status: string;
+        lifecycle_status: string;
+        message: string;
+        error_message?: string | null;
+      }>(`${API_URL}/retention/action`, {
+        user_id: OWNER_ID,
+        family_member_id: familyMemberId,
+        target_table,
+        target_id: String(target_id),
+        action,
+        reason: "User requested from CareOS Data Control",
+      });
+      setNotice(`${data.completion_status.toUpperCase()}: ${data.message}`);
+      const refreshed = await fetchRetentionState(OWNER_ID, familyMemberId);
+      setSummary(refreshed.summary);
+      setItems(refreshed.items);
+    } catch (requestError) {
+      const detail = axios.isAxiosError(requestError) && requestError.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Lifecycle action failed.");
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  return (
+    <ScreenShell title="Data control" description="Archive, restore, and remove records with visible completion status.">
+      {summary && <RetentionStatusPanel summary={summary} />}
+      {notice && <p className="rounded-xl border border-[#b8d8ca] bg-[#f1f8f5] p-3 text-sm font-medium text-[#12664f]">{notice}</p>}
+      <ErrorText text={error} />
+      {loading && !error ? <LoadingState text="Loading lifecycle state..." /> : null}
+      {items && (
+        <div className="space-y-4">
+          <RetentionGroup title="Health events" table="health_events" records={items.health_events} busyKey={busyKey} onAction={runAction} />
+          <RetentionGroup title="Reports" table="reports" records={items.reports} busyKey={busyKey} onAction={runAction} />
+          <RetentionGroup title="Medications" table="medications" records={items.medications} busyKey={busyKey} onAction={runAction} />
+          <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase text-[#71827a]">Lifecycle audit</p>
+            <div className="mt-3 space-y-2">
+              {items.events.slice(0, 8).map((event, index) => (
+                <div key={index} className="rounded-xl border border-[#e1ece7] bg-[#fbfdfc] p-3 text-xs leading-5 text-[#52665d]">
+                  <span className="font-semibold text-[#18352a]">{String(event.action ?? "action")}</span>
+                  {" "}{String(event.target_table ?? "record")} #{String(event.target_id ?? "")}
+                  <span className="ml-2 rounded-full bg-white px-2 py-0.5 font-semibold text-[#12664f] ring-1 ring-[#dce8e2]">{String(event.completion_status ?? "unknown")}</span>
+                </div>
+              ))}
+              {!items.events.length && <EmptyState text="No lifecycle actions recorded yet." />}
+            </div>
+          </section>
+        </div>
+      )}
+    </ScreenShell>
+  );
+}
+
+function RetentionStatusPanel({ summary }: { summary: RetentionSummary }) {
+  const statusStyles: Record<RetentionSummary["capability_status"], string> = {
+    complete: "border-[#b8d8ca] bg-[#f1f8f5] text-[#12664f]",
+    partial: "border-[#ead39a] bg-[#fff8e7] text-[#8a5a10]",
+    blocked: "border-[#efb2a8] bg-[#fff2ef] text-[#982d1d]",
+    unresolved: "border-[#d7c7ef] bg-[#f8f3ff] text-[#684899]",
+    no_actions: "border-[#d2e1da] bg-white text-[#52665d]",
+  };
+  const label = summary.capability_status.replace("_", " ").toUpperCase();
+  return (
+    <section className={`rounded-2xl border p-4 shadow-sm ${statusStyles[summary.capability_status]}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase opacity-80">Retention capability</p>
+          <h2 className="mt-1 text-xl font-bold">{label}</h2>
+        </div>
+        <ShieldCheck size={28} />
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+        <MetricTile label="Active" value={String(summary.active)} tone="good" />
+        <MetricTile label="Archived" value={String(summary.archived)} />
+        <MetricTile label="Deleted" value={String(summary.deleted)} tone={summary.deleted ? "warn" : "neutral"} />
+        <MetricTile label="Completed actions" value={String(summary.complete)} tone="good" />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        <MetricTile label="Partial" value={String(summary.partial)} tone={summary.partial ? "warn" : "neutral"} />
+        <MetricTile label="Blocked" value={String(summary.blocked)} tone={summary.blocked ? "warn" : "neutral"} />
+        <MetricTile label="Unresolved" value={String(summary.unresolved)} tone={summary.unresolved ? "warn" : "neutral"} />
+        <MetricTile label="Pending deletion" value={String(summary.pending_deletion)} />
+      </div>
+    </section>
+  );
+}
+
+function RetentionGroup({
+  title,
+  table,
+  records,
+  busyKey,
+  onAction,
+}: {
+  title: string;
+  table: "health_events" | "reports" | "medications";
+  records: RetentionRecord[];
+  busyKey: string;
+  onAction: (table: string, id: string | number, action: "archive" | "restore" | "delete") => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#d2e1da] bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#71827a]">{title}</p>
+          <p className="mt-1 text-sm text-[#52665d]">{records.length} records with lifecycle state</p>
+        </div>
+        <Archive className="text-[#12664f]" size={20} />
+      </div>
+      <div className="space-y-3">
+        {records.map((record) => {
+          const status = record.lifecycle_status || "active";
+          const isBusy = busyKey.startsWith(`${table}-${record.id}-`);
+          return (
+            <article key={`${table}-${record.id}`} className="rounded-xl border border-[#e1ece7] bg-[#fbfdfc] p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[#18352a]">{retentionTitle(table, record)}</p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#60736a]">{retentionDetail(table, record)}</p>
+                  <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${status === "active" ? "bg-[#eef8f2] text-[#12664f]" : status === "archived" ? "bg-[#fff8e7] text-[#8a5a10]" : "bg-[#fff2ef] text-[#982d1d]"}`}>
+                    {status.replace("_", " ")}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {status === "active" ? (
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "archive")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title="Archive">
+                      {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <Archive size={16} />}
+                    </button>
+                  ) : (
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "restore")} className="grid size-9 place-items-center rounded-lg border border-[#b7cbc2] text-[#12664f] hover:bg-[#eef7f3] disabled:opacity-40" title="Restore">
+                      {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                    </button>
+                  )}
+                  {status !== "deleted" && (
+                    <button type="button" disabled={isBusy} onClick={() => onAction(table, record.id, "delete")} className="grid size-9 place-items-center rounded-lg border border-[#efb2a8] text-[#982d1d] hover:bg-[#fff2ef] disabled:opacity-40" title="Delete">
+                      {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+        {!records.length && <EmptyState text={`No ${title.toLowerCase()} found for this profile.`} />}
+      </div>
+    </section>
+  );
+}
+
+function retentionTitle(table: string, record: RetentionRecord) {
+  if (table === "reports") return record.report_type || "Medical report";
+  if (table === "medications") return record.drug_name || "Medication";
+  return record.event_type?.replaceAll("_", " ") || "Health event";
+}
+
+function retentionDetail(table: string, record: RetentionRecord) {
+  if (table === "reports") return record.ai_summary || "No report summary.";
+  if (table === "medications") return [record.dose, record.created_at && formatDate(record.created_at)].filter(Boolean).join(" | ") || "No medication detail.";
+  return record.description || "No event description.";
+}
+
 function EmergencyOverlay({
   details,
   onClose,
@@ -2125,7 +2375,7 @@ function DesktopNavigation({ active, onChange }: { active: Tab; onChange: (tab: 
 
 function MobileNavigation({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-6 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid h-20 grid-cols-7 border-t border-[#c8ded4] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(18,102,79,0.08)] backdrop-blur md:hidden">
       {navigation.map(({ id, label, icon: Icon }) => (
         <button
           key={id}

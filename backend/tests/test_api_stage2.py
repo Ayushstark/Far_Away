@@ -387,3 +387,54 @@ def test_stage4_profile_reports_and_interaction_routes(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()["message"] == "No known major interaction found."
+
+
+def test_retention_routes_expose_completion_state(monkeypatch) -> None:
+    monkeypatch.setattr(
+        db,
+        "get_retention_summary",
+        lambda *args, **kwargs: {
+            "active": 2,
+            "archived": 1,
+            "pending_deletion": 0,
+            "deleted": 0,
+            "complete": 1,
+            "partial": 0,
+            "blocked": 0,
+            "unresolved": 0,
+            "capability_status": "complete",
+            "latest_event": {"action": "archive"},
+        },
+    )
+    monkeypatch.setattr(db, "get_retention_items", lambda *args, **kwargs: {"reports": [{"id": "1"}]})
+    monkeypatch.setattr(db, "get_lifecycle_audit", lambda *args, **kwargs: [{"action": "archive"}])
+    monkeypatch.setattr(
+        db,
+        "lifecycle_action",
+        lambda **kwargs: {
+            "target_table": kwargs["target_table"],
+            "target_id": kwargs["target_id"],
+            "action": kwargs["action"],
+            "lifecycle_status": "archived",
+            "completion_status": "complete",
+            "message": "Report archive completed.",
+            "error_message": None,
+        },
+    )
+
+    assert client.get("/retention/summary/user-1").json()["capability_status"] == "complete"
+    assert client.get("/retention/items/user-1").json()["reports"][0]["id"] == "1"
+    assert client.get("/retention/audit/user-1").json()[0]["action"] == "archive"
+
+    response = client.post(
+        "/retention/action",
+        json={
+            "user_id": "user-1",
+            "target_table": "reports",
+            "target_id": "1",
+            "action": "archive",
+            "reason": "Round 2 demo",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["completion_status"] == "complete"

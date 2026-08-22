@@ -18,6 +18,18 @@ AgentName = Literal[
     "emergency_detector",
 ]
 MedicationAction = Literal["add", "check_interactions", "explain", "list"]
+RetentionTarget = Literal["health_events", "reports", "medications"]
+RetentionAction = Literal["archive", "restore", "delete"]
+LifecycleStatus = Literal[
+    "active",
+    "archived",
+    "pending_deletion",
+    "deleted",
+    "restore_failed",
+    "delete_failed",
+    "archive_failed",
+]
+CompletionStatus = Literal["complete", "partial", "blocked", "unresolved"]
 
 
 class ChatRequest(BaseModel):
@@ -213,3 +225,35 @@ class InteractionCheckRequest(BaseModel):
 
 class InteractionCheckResponse(BaseModel):
     message: str
+
+
+class RetentionActionRequest(BaseModel):
+    user_id: str
+    family_member_id: str | None = None
+    target_table: RetentionTarget
+    target_id: str
+    action: RetentionAction
+    reason: str = Field(default="", max_length=500)
+
+
+class RetentionActionResponse(BaseModel):
+    target_table: str
+    target_id: str
+    action: str
+    lifecycle_status: str
+    completion_status: CompletionStatus
+    message: str
+    error_message: str | None = None
+
+
+class RetentionSummaryResponse(BaseModel):
+    active: int = 0
+    archived: int = 0
+    pending_deletion: int = 0
+    deleted: int = 0
+    complete: int = 0
+    partial: int = 0
+    blocked: int = 0
+    unresolved: int = 0
+    capability_status: Literal["complete", "partial", "blocked", "unresolved", "no_actions"] = "no_actions"
+    latest_event: dict[str, Any] | None = None
