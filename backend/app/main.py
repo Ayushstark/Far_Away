@@ -458,9 +458,10 @@ async def add_medication(request: MedicationCreate) -> dict:
 async def list_medications(
     user_id: str,
     family_member_id: str | None = None,
+    status: str = "active",
 ) -> list[dict]:
     try:
-        return db.get_medications(user_id, family_member_id)
+        return db.get_medications(user_id, family_member_id, status=status)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not load medications: {exc}") from exc
 
@@ -490,9 +491,10 @@ async def check_medication_interactions(
 async def reports(
     user_id: str,
     family_member_id: str | None = None,
+    status: str = "active",
 ) -> list[dict]:
     try:
-        return db.get_reports(user_id, family_member_id)
+        return db.get_reports(user_id, family_member_id, status=status)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not load reports: {exc}") from exc
 

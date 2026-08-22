@@ -233,6 +233,37 @@ def test_get_reports_returns_recent_family_reports(monkeypatch) -> None:
     assert ("reports", "limit", 3) in client.calls
 
 
+def test_get_reports_status_filter_archived(monkeypatch) -> None:
+    client = FakeClient({"reports": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    db.get_reports("user-1", status="archived")
+
+    assert ("reports", "in", "lifecycle_status", ["archived"]) in client.calls
+    assert ("reports", "in", "lifecycle_status", ["active"]) not in client.calls
+
+
+def test_get_reports_status_filter_all_skips_lifecycle_filter(monkeypatch) -> None:
+    client = FakeClient({"reports": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    db.get_reports("user-1", status="all")
+
+    assert not any(call[0] == "reports" and call[1] == "in" for call in client.calls)
+
+
+def test_get_medications_status_filter_archived_and_all(monkeypatch) -> None:
+    client = FakeClient({"medications": []})
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    db.get_medications("user-1", status="archived")
+    assert ("medications", "in", "lifecycle_status", ["archived"]) in client.calls
+
+    client.calls.clear()
+    db.get_medications("user-1", status="all")
+    assert not any(call[0] == "medications" and call[1] == "in" for call in client.calls)
+
+
 def test_lifecycle_action_archives_and_audits_record(monkeypatch) -> None:
     rows = {
         "reports": [{"id": "report-1", "user_id": "user-1", "lifecycle_status": "active"}],

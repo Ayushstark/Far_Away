@@ -195,6 +195,7 @@ type Report = {
   uploaded_at?: string;
   ai_summary: string;
   flagged_values?: Record<string, unknown>;
+  lifecycle_status?: string;
 };
 
 type Medication = {
@@ -204,7 +205,10 @@ type Medication = {
   frequency: string;
   timing?: string[] | string;
   with_food?: boolean;
+  lifecycle_status?: string;
 };
+
+type RecordStatusFilter = "active" | "archived" | "all";
 
 type SpeechRecognitionInstance = {
   continuous: boolean;
@@ -1614,6 +1618,46 @@ function RetentionStatusPanel({ summary }: { summary: RetentionSummary }) {
   );
 }
 
+function lifecycleChipClass(status: string): string {
+  if (status === "active") return "bg-[#eef8f2] text-[#12664f]";
+  if (status === "archived") return "bg-[#fff8e7] text-[#8a5a10]";
+  return "bg-[#fff2ef] text-[#982d1d]";
+}
+
+function LifecycleChip({ status }: { status?: string }) {
+  const value = status || "active";
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${lifecycleChipClass(value)}`}>
+      {value.replace("_", " ")}
+    </span>
+  );
+}
+
+// Shared by ReportsScreen and MedicationsScreen so both stay in lockstep with
+// what Data Control considers "active" / "archived" / "all" - no separate
+// filter logic duplicated per screen.
+function StatusFilterTabs({ value, onChange }: { value: RecordStatusFilter; onChange: (next: RecordStatusFilter) => void }) {
+  const options: { id: RecordStatusFilter; label: string }[] = [
+    { id: "active", label: "Active" },
+    { id: "archived", label: "Archived" },
+    { id: "all", label: "All" },
+  ];
+  return (
+    <div className="inline-flex rounded-lg border border-[#d2e1da] bg-white p-1 text-xs font-semibold">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          className={`rounded-md px-3 py-1.5 transition ${value === option.id ? "bg-[#12664f] text-white" : "text-[#52665d] hover:bg-[#eef7f3]"}`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function RetentionGroup({
   title,
   table,
@@ -1646,9 +1690,7 @@ function RetentionGroup({
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-[#18352a]">{retentionTitle(table, record)}</p>
                   <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#60736a]">{retentionDetail(table, record)}</p>
-                  <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${status === "active" ? "bg-[#eef8f2] text-[#12664f]" : status === "archived" ? "bg-[#fff8e7] text-[#8a5a10]" : "bg-[#fff2ef] text-[#982d1d]"}`}>
-                    {status.replace("_", " ")}
-                  </span>
+                  <div className="mt-2"><LifecycleChip status={status} /></div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {status === "active" ? (
@@ -1740,13 +1782,14 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const [initialLoading, setInitialLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RecordStatusFilter>("active");
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     axios
       .get<Report[]>(`${API_URL}/reports/${OWNER_ID}`, {
-        params: { family_member_id: familyMemberId },
+        params: { family_member_id: familyMemberId, status: statusFilter },
         signal: controller.signal,
       })
       .then(({ data }) => setReports(data))
@@ -1757,12 +1800,12 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
         if (!controller.signal.aborted) setInitialLoading(false);
       });
     return () => controller.abort();
-  }, [OWNER_ID, familyMemberId]);
+  }, [OWNER_ID, familyMemberId, statusFilter]);
 
   async function loadReports() {
     try {
       const { data } = await axios.get<Report[]>(`${API_URL}/reports/${OWNER_ID}`, {
-        params: { family_member_id: familyMemberId },
+        params: { family_member_id: familyMemberId, status: statusFilter },
       });
       setReports(data);
     } catch {
@@ -1821,12 +1864,19 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
       </button>
       <ErrorText text={error} />
       {!initialLoading && reports.length > 0 && <ReportInsights reports={reports} />}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase text-[#71827a]">Lifecycle view</p>
+        <StatusFilterTabs value={statusFilter} onChange={setStatusFilter} />
+      </div>
       <div className="space-y-3">
         {reports.map((report) => (
           <article key={report.id} className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm transition hover:border-[#b7cbc2] hover:shadow-md">
             <button className="flex w-full items-start justify-between gap-3 text-left" onClick={() => setExpanded(expanded === report.id ? null : report.id)}>
               <div>
-                <p className="text-sm font-semibold">{report.report_type}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold">{report.report_type}</p>
+                  <LifecycleChip status={report.lifecycle_status} />
+                </div>
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#687971]">{report.ai_summary}</p>
                 <p className="mt-2 text-[11px] text-[#87958e]">{formatDate(report.report_date ?? report.uploaded_at)}</p>
               </div>
@@ -1836,7 +1886,17 @@ function ReportsScreen({ familyMemberId }: { familyMemberId?: string }) {
           </article>
         ))}
         {initialLoading && <LoadingState text="Loading reports..." />}
-        {!initialLoading && !reports.length && !error && <EmptyState text="No reports uploaded yet." />}
+        {!initialLoading && !reports.length && !error && (
+          <EmptyState
+            text={
+              statusFilter === "archived"
+                ? "No archived reports. Archive one from Data control to see it here."
+                : statusFilter === "all"
+                ? "No reports uploaded yet."
+                : "No active reports. Check the Archived tab, or Data control, if you expected one here."
+            }
+          />
+        )}
       </div>
     </ScreenShell>
   );
@@ -1902,6 +1962,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   const [initialLoading, setInitialLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RecordStatusFilter>("active");
   const [remindersEnabled, setRemindersEnabled] = useState(() =>
     typeof window !== "undefined"
     && window.localStorage.getItem("careos-medication-reminders") === "true"
@@ -1911,7 +1972,11 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
 
   useEffect(() => {
     if (!remindersEnabled || !("Notification" in window)) return;
-    const timers = medications.flatMap((medication) =>
+    // Reminders must only ever fire for active medications - even while the
+    // Archived/All tab is on screen for review, an archived medication
+    // should not still be nagging the user to take it.
+    const activeMedications = medications.filter((medication) => (medication.lifecycle_status || "active") === "active");
+    const timers = activeMedications.flatMap((medication) =>
       textList(medication.timing).map((timing) => {
         const doseTime = nextDoseTime(timing);
         if (!doseTime) return undefined;
@@ -1929,7 +1994,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
     const controller = new AbortController();
     axios
       .get<Medication[]>(`${API_URL}/medications/${OWNER_ID}`, {
-        params: { family_member_id: familyMemberId },
+        params: { family_member_id: familyMemberId, status: statusFilter },
         signal: controller.signal,
       })
       .then(({ data }) => setMedications(data))
@@ -1940,12 +2005,12 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
         if (!controller.signal.aborted) setInitialLoading(false);
       });
     return () => controller.abort();
-  }, [OWNER_ID, familyMemberId]);
+  }, [OWNER_ID, familyMemberId, statusFilter]);
 
   async function loadMedications() {
     try {
       const { data } = await axios.get<Medication[]>(`${API_URL}/medications/${OWNER_ID}`, {
-        params: { family_member_id: familyMemberId },
+        params: { family_member_id: familyMemberId, status: statusFilter },
       });
       setMedications(data);
     } catch {
@@ -2014,7 +2079,7 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
   }
 
   return (
-    <ScreenShell title="Active medications" description="Track doses, timing, and possible interactions.">
+    <ScreenShell title="Medications" description="Track doses, timing, and possible interactions.">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#c8ded4] bg-[#eef7f3] p-4 shadow-sm">
         <div>
           <p className="text-sm font-semibold">Medication reminders</p>
@@ -2025,19 +2090,38 @@ function MedicationsScreen({ familyMemberId }: { familyMemberId?: string }) {
           {remindersEnabled ? "Reminders active" : "Enable reminders"}
         </button>
       </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase text-[#71827a]">Lifecycle view</p>
+        <StatusFilterTabs value={statusFilter} onChange={setStatusFilter} />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {medications.map((medication) => (
           <article key={medication.id} className="rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm transition hover:border-[#b7cbc2] hover:shadow-md">
-            <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><Pill size={18} /></span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="grid size-9 place-items-center rounded-lg bg-[#eef7f3] text-[#12664f]"><Pill size={18} /></span>
+              <LifecycleChip status={medication.lifecycle_status} />
+            </div>
             <p className="mt-3 text-sm font-semibold">{medication.drug_name}</p>
             <p className="mt-1 text-xs text-[#687971]">{medication.dose} | {medication.frequency}</p>
             <p className="mt-2 text-xs text-[#687971]">{formatList(medication.timing) || "Timing not set"}{medication.with_food ? " | with food" : ""}</p>
-            <p className="mt-3 rounded-lg border border-[#d7e8df] bg-[#f7fbf9] px-3 py-2 text-xs font-semibold text-[#12664f]">{nextDoseLabel(textList(medication.timing))}</p>
+            <p className="mt-3 rounded-lg border border-[#d7e8df] bg-[#f7fbf9] px-3 py-2 text-xs font-semibold text-[#12664f]">
+              {(medication.lifecycle_status || "active") === "active" ? nextDoseLabel(textList(medication.timing)) : "Not in active reminders"}
+            </p>
           </article>
         ))}
       </div>
       {initialLoading && <LoadingState text="Loading medications..." />}
-      {!initialLoading && !medications.length && !error && <EmptyState text="No active medications." />}
+      {!initialLoading && !medications.length && !error && (
+        <EmptyState
+          text={
+            statusFilter === "archived"
+              ? "No archived medications. Archive one from Data control to see it here."
+              : statusFilter === "all"
+              ? "No medications added yet."
+              : "No active medications. Check the Archived tab, or Data control, if you expected one here."
+          }
+        />
+      )}
       <form onSubmit={addMedication} className="space-y-3 rounded-xl border border-[#d2e1da] bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">Add medication</h2>
         <div className="grid gap-3 sm:grid-cols-2">

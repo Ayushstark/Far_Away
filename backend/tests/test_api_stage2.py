@@ -318,7 +318,7 @@ def test_family_medication_and_history_routes(monkeypatch) -> None:
     monkeypatch.setattr(db, "create_family_member", lambda **kwargs: {"id": "family-1", **kwargs})
     monkeypatch.setattr(db, "get_family_members", lambda owner_id: [{"owner_id": owner_id}])
     monkeypatch.setattr(db, "add_medication", lambda **kwargs: {"id": "med-1", **kwargs})
-    monkeypatch.setattr(db, "get_medications", lambda *args: [{"drug_name": "Metformin"}])
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [{"drug_name": "Metformin"}])
     monkeypatch.setattr(db, "get_health_history", lambda *args, **kwargs: "Timeline")
 
     family = client.post(
@@ -370,8 +370,8 @@ def test_doctor_brief_uses_database_context(monkeypatch) -> None:
 
 def test_stage4_profile_reports_and_interaction_routes(monkeypatch) -> None:
     monkeypatch.setattr(db, "get_user", lambda user_id: {"id": user_id, "name": "Ramesh"})
-    monkeypatch.setattr(db, "get_reports", lambda *args: [{"id": "report-1"}])
-    monkeypatch.setattr(db, "get_medications", lambda *args: [{"drug_name": "Metformin"}])
+    monkeypatch.setattr(db, "get_reports", lambda *args, **kwargs: [{"id": "report-1"}])
+    monkeypatch.setattr(db, "get_medications", lambda *args, **kwargs: [{"drug_name": "Metformin"}])
 
     async def check_interactions(*args, **kwargs):
         return "No known major interaction found."
@@ -387,6 +387,35 @@ def test_stage4_profile_reports_and_interaction_routes(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()["message"] == "No known major interaction found."
+
+
+def test_reports_and_medications_routes_pass_status_filter_through(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_reports(user_id, family_member_id=None, *, status="active"):
+        captured["reports_status"] = status
+        return [{"id": "report-1", "lifecycle_status": status}]
+
+    def fake_get_medications(user_id, family_member_id=None, *, status="active"):
+        captured["medications_status"] = status
+        return [{"drug_name": "Metformin", "lifecycle_status": status}]
+
+    monkeypatch.setattr(db, "get_reports", fake_get_reports)
+    monkeypatch.setattr(db, "get_medications", fake_get_medications)
+
+    # No status query param -> backend still defaults to "active".
+    assert client.get("/reports/user-1").status_code == 200
+    assert captured["reports_status"] == "active"
+    assert client.get("/medications/user-1").status_code == 200
+    assert captured["medications_status"] == "active"
+
+    archived_reports = client.get("/reports/user-1?status=archived")
+    assert archived_reports.json()[0]["lifecycle_status"] == "archived"
+    assert captured["reports_status"] == "archived"
+
+    all_medications = client.get("/medications/user-1?status=all")
+    assert all_medications.json()[0]["lifecycle_status"] == "all"
+    assert captured["medications_status"] == "all"
 
 
 def test_retention_routes_expose_completion_state(monkeypatch) -> None:

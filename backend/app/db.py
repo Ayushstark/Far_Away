@@ -25,6 +25,7 @@ TEXT_ARRAY_COLUMNS = {
 RETENTION_TABLES = {"health_events", "reports", "medications"}
 LIFECYCLE_STATUSES = ("active", "archived", "pending_deletion", "deleted")
 COMPLETION_STATUSES = ("complete", "partial", "blocked", "unresolved")
+RECORD_STATUS_FILTERS = ("active", "archived", "all")
 
 
 def get_client() -> Client:
@@ -276,7 +277,16 @@ def save_health_event(
 def get_medications(
     user_id: str,
     family_member_id: str | None = None,
+    *,
+    status: str = "active",
 ) -> list[dict[str, Any]]:
+    """Return medications for the profile.
+
+    `status` is a display-layer filter for the Medications screen
+    (active/archived/all). AI-context callers should keep calling this with
+    the default "active" so archived medications never re-enter chat,
+    daily-plan, or doctor-brief context.
+    """
     query = (
         get_client()
         .table("medications")
@@ -285,7 +295,7 @@ def get_medications(
         .eq("is_active", True)
     )
     response = (
-        _active_lifecycle(_scope_family_member(query, family_member_id))
+        _apply_status_filter(_scope_family_member(query, family_member_id), status)
         .order("created_at", desc=True)
         .execute()
     )
@@ -372,13 +382,20 @@ def get_reports(
     user_id: str,
     family_member_id: str | None = None,
     limit: int = 20,
-    include_archived: bool = False,
+    *,
+    status: str = "active",
 ) -> list[dict[str, Any]]:
+    """Return reports for the profile.
+
+    `status` is a display-layer filter for the Reports screen
+    (active/archived/all). AI-context callers should keep calling this with
+    the default "active" so archived reports never re-enter chat,
+    daily-plan, or doctor-brief context.
+    """
     query = get_client().table("reports").select("*").eq("user_id", user_id)
-    if not include_archived:
-        query = _active_lifecycle(query)
+    query = _apply_status_filter(_scope_family_member(query, family_member_id), status)
     response = (
-        _scope_family_member(query, family_member_id)
+        query
         .order("uploaded_at", desc=True)
         .limit(limit)
         .execute()
@@ -605,6 +622,22 @@ def _scope_family_member(query: Any, family_member_id: str | None) -> Any:
 
 def _active_lifecycle(query: Any) -> Any:
     return query.in_("lifecycle_status", ["active"])
+
+
+def _apply_status_filter(query: Any, status: str) -> Any:
+    """Filter a reports/medications query by display-layer lifecycle status.
+
+    "active" (default) and "archived" narrow to that single lifecycle state;
+    an unrecognized value falls back to "active" so a bad query param from
+    the frontend can never accidentally widen what AI context or a screen
+    sees. "all" applies no lifecycle filter at all, matching what the Data
+    Control tab already shows.
+    """
+    if status == "all":
+        return query
+    if status == "archived":
+        return query.in_("lifecycle_status", ["archived"])
+    return _active_lifecycle(query)
 
 
 def _retention_rows(
