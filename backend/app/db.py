@@ -5,7 +5,7 @@ final Supabase schema, while leaving orchestration code focused on healthcare
 workflows.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 import secrets
 from typing import Any
@@ -703,6 +703,36 @@ def get_retention_items(
         "medications": _retention_rows(user_id, "medications", family_member_id),
         "events": get_lifecycle_audit(user_id, family_member_id, limit=50),
     }
+
+
+def purge_expired_deleted_records(older_than_days: int = 30) -> dict[str, int]:
+    """Hard-delete rows that have sat as soft-deleted longer than the
+    retention window, so "delete" eventually frees real storage instead of
+    keeping every soft-deleted row forever.
+
+    The audit trail is untouched: rows in `data_lifecycle_events` are a
+    separate table and are never purged here, so the record that a delete
+    happened - and when - survives even after the underlying row is gone.
+
+    Scoped to RETENTION_TABLES (health_events, reports, medications), which
+    have a `deleted_at` timestamp to purge by. `family_members` is
+    intentionally excluded - its lifecycle columns don't yet track
+    `deleted_at`, so there's no reliable age to purge on. Intended to run on
+    a schedule (see purge_deleted_records.py), not inside a request.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    purged: dict[str, int] = {}
+    for table in RETENTION_TABLES:
+        response = (
+            get_client()
+            .table(table)
+            .delete()
+            .eq("lifecycle_status", "deleted")
+            .lt("deleted_at", cutoff)
+            .execute()
+        )
+        purged[table] = len(response.data or [])
+    return purged
 
 
 def get_context_usage(

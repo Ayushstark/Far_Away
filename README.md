@@ -1,5 +1,7 @@
 # CareOS
 
+[![CI](https://github.com/Ayushstark/Far_Away/actions/workflows/ci.yml/badge.svg)](https://github.com/Ayushstark/Far_Away/actions/workflows/ci.yml)
+
 CareOS is an emergency-first, multi-agent healthcare companion for Indian
 families. It turns scattered symptoms, medications, lab reports, and family
 health context into clear next steps and a doctor-ready care brief.
@@ -267,14 +269,16 @@ sequenceDiagram
 ## Project Structure
 
 ```text
-agents/          Five specialist agent implementations
-backend/app/     FastAPI, schemas, services, and Supabase database layer
-backend/tests/   Database, API, and orchestration tests
-docs/            CareOS architecture diagram
-frontend/        Next.js care workspace
-memory/          ChromaDB semantic-memory adapter
-api.py           Deployment-friendly FastAPI entrypoint
-seed_data.py     Repeatable Supabase demo dataset
+.github/workflows/  CI: backend tests + frontend typecheck/lint/build on every push
+agents/             Five specialist agent implementations
+backend/app/        FastAPI, schemas, services, and Supabase database layer
+backend/tests/      Database, API, and orchestration tests
+docs/               CareOS architecture diagram
+frontend/           Next.js care workspace
+memory/             ChromaDB semantic-memory adapter
+api.py              Deployment-friendly FastAPI entrypoint
+seed_data.py        Repeatable Supabase demo dataset
+purge_deleted_records.py  Hard-delete records past the soft-delete retention window
 ```
 
 ## Local Setup
@@ -334,17 +338,19 @@ Create a public Supabase Storage bucket named `reports`. The database expects
 the five tables described by the project architecture: `users`,
 `family_members`, `health_events`, `medications`, and `reports`.
 
-Run these three SQL files once each, in order, in the Supabase SQL editor:
+Run these SQL files once each, in order, in the Supabase SQL editor:
 
 | # | File | What it does |
 | --- | --- | --- |
 | 1 | [`supabase_schema_fix.sql`](supabase_schema_fix.sql) | Fixes the misspelled health-event foreign key, allows owner records without a family member, and adds `auth_user_id`/`email` to map Supabase Auth accounts to CareOS profiles |
 | 2 | [`supabase_data_retention.sql`](supabase_data_retention.sql) | Adds `lifecycle_status`/`archived_at`/`deleted_at`/`restored_at`/`retention_reason` to `health_events`, `reports`, and `medications`, and creates the `data_lifecycle_events` audit table |
 | 3 | [`supabase_family_lifecycle.sql`](supabase_family_lifecycle.sql) | Adds `lifecycle_status`/`retention_reason` to `family_members` so dependent profiles can be archived/restored/deleted the same way |
+| 4 | [`supabase_row_level_security.sql`](supabase_row_level_security.sql) | Enables Row-Level Security on every table, scoped to the signed-in Supabase Auth user - a defense-in-depth safety net; the backend's service-role key still bypasses it, so nothing about current app behavior changes |
 
 Skipping #2 or #3 doesn't break the app, but Data Control and the Family
 archive/delete buttons will fail with a lifecycle-related error until the
-matching migration has been run. Enable Email authentication in Supabase
+matching migration has been run. #4 is additive security hardening and is
+safe to run at any time. Enable Email authentication in Supabase
 Authentication; email confirmation may be enabled or disabled depending on
 the desired demo flow.
 
@@ -475,7 +481,11 @@ npm run build
 ```
 
 Automated coverage includes backend API/database/orchestration tests plus
-frontend lint, TypeScript, and production build checks.
+frontend lint, TypeScript, and production build checks. The same three
+checks (`pytest`, `tsc`/`lint`, `next build`) run automatically on every
+push and pull request via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) -
+this is what would have caught the deployed-backend-vs-code drift that
+previously surfaced as a "Not Found" error in the running app.
 
 ## What Is Already Done
 
@@ -506,12 +516,16 @@ frontend lint, TypeScript, and production build checks.
 - Lifecycle tree and validated-palette stacked-bar visualizations
 - Centralized English/Hindi UI translation layer beyond the chat screen
 - Punctuation-safe, ~15% faster CareOS voice output
+- GitHub Actions CI running backend tests and frontend typecheck/lint/build on every push
+- Row-Level Security policies scripted for every table (`supabase_row_level_security.sql`)
+- A hard-delete purge script (`purge_deleted_records.py`) for records past the soft-delete retention window
 
 ### Before Real Users
 
-- Enable and test row-level security for every table and storage object
+- Test Row-Level Security against storage objects too (table RLS is scripted - see `supabase_row_level_security.sql` - storage bucket policies are not)
 - Add emergency-contact notification flows
-- Encrypt sensitive fields and set a hard-delete/purge policy behind the current soft-delete lifecycle
+- Encrypt sensitive fields, and schedule `purge_deleted_records.py` (Render Cron Job or equivalent) rather than running it manually
+- Extend the hard-delete purge to `family_members` once it tracks a `deleted_at` timestamp
 - Add clinician-reviewed prompt evaluations and emergency false-negative tests
 - Add server-scheduled push/SMS medication reminder delivery
 - Add observability, rate limits, provider-failure monitoring, and retries

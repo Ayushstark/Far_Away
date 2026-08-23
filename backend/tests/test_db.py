@@ -55,6 +55,14 @@ class FakeQuery:
         self.inserted = payload
         return self
 
+    def delete(self) -> "FakeQuery":
+        self.client.calls.append((self.table, "delete"))
+        return self
+
+    def lt(self, column: str, value: Any) -> "FakeQuery":
+        self.client.calls.append((self.table, "lt", column, value))
+        return self
+
     def execute(self) -> FakeResponse:
         return FakeResponse([self.inserted] if self.inserted else self.rows)
 
@@ -502,3 +510,23 @@ def test_family_member_lifecycle_action_blocked_when_member_missing(monkeypatch)
 
     assert result["completion_status"] == "blocked"
     assert result["error_message"] == "Family member not found."
+
+
+def test_purge_expired_deleted_records_counts_per_table(monkeypatch) -> None:
+    client = FakeClient(
+        {
+            "health_events": [{"id": "he-1"}, {"id": "he-2"}],
+            "reports": [{"id": "r-1"}],
+            "medications": [],
+        },
+    )
+    monkeypatch.setattr(db, "get_client", lambda: client)
+
+    purged = db.purge_expired_deleted_records(older_than_days=30)
+
+    assert purged == {"health_events": 2, "reports": 1, "medications": 0}
+    assert ("health_events", "delete") in client.calls
+    assert ("health_events", "eq", "lifecycle_status", "deleted") in client.calls
+    assert any(call[:3] == ("health_events", "lt", "deleted_at") for call in client.calls)
+    # family_members is intentionally never purged - no deleted_at to age on.
+    assert all(call[0] != "family_members" for call in client.calls)
